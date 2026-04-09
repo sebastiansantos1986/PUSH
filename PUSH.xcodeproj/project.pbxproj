@@ -1,0 +1,340 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		U101 /* main.swift in push-ui */ = {isa = PBXBuildFile; fileRef = F101; };
+		U102 /* UIConfig.swift in push-ui */ = {isa = PBXBuildFile; fileRef = F102; };
+		U103 /* UIState.swift in push-ui */ = {isa = PBXBuildFile; fileRef = F103; };
+		U104 /* SharedComponents.swift in push-ui */ = {isa = PBXBuildFile; fileRef = F104; };
+		U105 /* PopupViews.swift in push-ui */ = {isa = PBXBuildFile; fileRef = F105; };
+		U106 /* InstallAssistant.icns in push-ui resources */ = {isa = PBXBuildFile; fileRef = F106; };
+		U201 /* main.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F201; };
+		U202 /* CLIHelpers.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F202; };
+		U203 /* CLIConfig.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F203; };
+		U204 /* AutoCheckCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F204; };
+		U205 /* StatusCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F205; };
+		U206 /* ConfigCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F206; };
+		U207 /* PopupCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F207; };
+		U208 /* LogCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F208; };
+		U209 /* DetectionLog.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F209; };
+		U210 /* InstallCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F210; };
+		U211 /* NotificationManager.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F211; };
+		U212 /* PreflightChecks.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F212; };
+		U213 /* ReportCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F213; };
+		U214 /* SelfUpdateCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F214; };
+		U215 /* DashboardCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F215; };
+		U216 /* PlatformInfo.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F216; };
+		U217 /* DownloadCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F217; };
+		U218 /* ExtrasCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F218; };
+		U219 /* MDMCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F219; };
+		U220 /* AuthCommand.swift in push-cli */ = {isa = PBXBuildFile; fileRef = F220; };
+		U301 /* PreviewApp.swift in PreviewHost */ = {isa = PBXBuildFile; fileRef = F301; };
+		U302 /* UIConfig.swift in PreviewHost */ = {isa = PBXBuildFile; fileRef = F102; };
+		U303 /* UIState.swift in PreviewHost */ = {isa = PBXBuildFile; fileRef = F103; };
+		U304 /* SharedComponents.swift in PreviewHost */ = {isa = PBXBuildFile; fileRef = F104; };
+		U305 /* PopupViews.swift in PreviewHost */ = {isa = PBXBuildFile; fileRef = F105; };
+		U306 /* InstallAssistant.icns in PreviewHost resources */ = {isa = PBXBuildFile; fileRef = F106; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		F101 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		F102 /* UIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIConfig.swift; sourceTree = "<group>"; };
+		F103 /* UIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIState.swift; sourceTree = "<group>"; };
+		F104 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
+		F105 /* PopupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupViews.swift; sourceTree = "<group>"; };
+		F106 /* InstallAssistant.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = InstallAssistant.icns; sourceTree = "<group>"; };
+		F201 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		F202 /* CLIHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIHelpers.swift; sourceTree = "<group>"; };
+		F203 /* CLIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIConfig.swift; sourceTree = "<group>"; };
+		F204 /* AutoCheckCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoCheckCommand.swift; sourceTree = "<group>"; };
+		F205 /* StatusCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusCommand.swift; sourceTree = "<group>"; };
+		F206 /* ConfigCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigCommand.swift; sourceTree = "<group>"; };
+		F207 /* PopupCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupCommand.swift; sourceTree = "<group>"; };
+		F208 /* LogCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogCommand.swift; sourceTree = "<group>"; };
+		F209 /* DetectionLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectionLog.swift; sourceTree = "<group>"; };
+		F210 /* InstallCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallCommand.swift; sourceTree = "<group>"; };
+		F211 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		F212 /* PreflightChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreflightChecks.swift; sourceTree = "<group>"; };
+		F213 /* ReportCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportCommand.swift; sourceTree = "<group>"; };
+		F214 /* SelfUpdateCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfUpdateCommand.swift; sourceTree = "<group>"; };
+		F215 /* DashboardCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCommand.swift; sourceTree = "<group>"; };
+		F216 /* PlatformInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformInfo.swift; sourceTree = "<group>"; };
+		F217 /* DownloadCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCommand.swift; sourceTree = "<group>"; };
+		F218 /* ExtrasCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtrasCommand.swift; sourceTree = "<group>"; };
+		F219 /* MDMCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDMCommand.swift; sourceTree = "<group>"; };
+		F220 /* AuthCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCommand.swift; sourceTree = "<group>"; };
+		F301 /* PreviewApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewApp.swift; sourceTree = "<group>"; };
+		P001 /* push-ui.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-ui.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		P002 /* push-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "push-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
+		P003 /* PreviewHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PreviewHost.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		PH01 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		PH02 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		PH03 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		GRP_ROOT = {
+			isa = PBXGroup;
+			children = (GRP_UI, GRP_CLI, GRP_PREVIEW, GRP_PRODUCTS);
+			sourceTree = "<group>";
+		};
+		GRP_UI = {
+			isa = PBXGroup;
+			children = (F101, F102, F103, F104, F105, F106);
+			path = "push-ui";
+			sourceTree = "<group>";
+		};
+		GRP_CLI = {
+			isa = PBXGroup;
+			children = (F201, F202, F203, F204, F205, F206, F207, F208, F209, F210, F211, F212, F213, F214, F215, F216, F217, F218, F219, F220);
+			path = "push-cli";
+			sourceTree = "<group>";
+		};
+		GRP_PREVIEW = {
+			isa = PBXGroup;
+			children = (F301);
+			path = "PreviewHost";
+			sourceTree = "<group>";
+		};
+		GRP_PRODUCTS = {
+			isa = PBXGroup;
+			children = (P001, P002, P003);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		T001 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XCL001;
+			buildPhases = (SRC001, PH01, RSC001);
+			buildRules = ();
+			dependencies = ();
+			name = "push-ui";
+			productName = "push-ui";
+			productReference = P001;
+			productType = "com.apple.product-type.application";
+		};
+		T002 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XCL002;
+			buildPhases = (SRC002, PH02);
+			buildRules = ();
+			dependencies = ();
+			name = "push-cli";
+			productName = "push-cli";
+			productReference = P002;
+			productType = "com.apple.product-type.tool";
+		};
+		T003 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XCL003;
+			buildPhases = (SRC003, PH03, RSC003);
+			buildRules = ();
+			dependencies = ();
+			name = "PreviewHost";
+			productName = "PreviewHost";
+			productReference = P003;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		PROJ001 = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					T001 = { CreatedOnToolsVersion = 15.0; };
+					T002 = { CreatedOnToolsVersion = 15.0; };
+					T003 = { CreatedOnToolsVersion = 15.0; };
+				};
+			};
+			buildConfigurationList = XCL_PROJ;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = GRP_ROOT;
+			productRefGroup = GRP_PRODUCTS;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (T001, T002, T003);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		RSC001 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (U106);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		RSC003 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (U306);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SRC001 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (U101, U102, U103, U104, U105);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		SRC002 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (U201, U202, U203, U204, U205, U206, U207, U208, U209, U210, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		SRC003 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (U301, U302, U303, U304, U305);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		XCBC_PROJ_DEBUG = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		XCBC_PROJ_RELEASE = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		XCBC_UI_DEBUG = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "PUSH";
+				INFOPLIST_KEY_LSUIElement = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = "-framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.push.push-ui";
+				PRODUCT_NAME = "push-ui";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		XCBC_UI_RELEASE = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "PUSH";
+				INFOPLIST_KEY_LSUIElement = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = "-framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.push.push-ui";
+				PRODUCT_NAME = "push-ui";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		XCBC_CLI_DEBUG = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_NAME = "push-cli";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		XCBC_CLI_RELEASE = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_NAME = "push-cli";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		XCBC_PH_DEBUG = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = "-framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.push.previewhost";
+				PRODUCT_NAME = "PreviewHost";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		XCBC_PH_RELEASE = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_SWIFT_FLAGS = "-framework IOKit";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.push.previewhost";
+				PRODUCT_NAME = "PreviewHost";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		XCL_PROJ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (XCBC_PROJ_DEBUG, XCBC_PROJ_RELEASE);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XCL001 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (XCBC_UI_DEBUG, XCBC_UI_RELEASE);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XCL002 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (XCBC_CLI_DEBUG, XCBC_CLI_RELEASE);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XCL003 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (XCBC_PH_DEBUG, XCBC_PH_RELEASE);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = PROJ001;
+}

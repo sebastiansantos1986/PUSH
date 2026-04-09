@@ -1,0 +1,311 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PUSH — Proactive Update Scheduling Helper                                  ║
+# ║  Configuration File                                                          ║
+# ║  Deploy to: /Library/Management/PUSH/config.yaml                            ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ── Update target ──────────────────────────────────────────────────────────────
+update:
+  # The macOS version you are enforcing. auto-check will fill this automatically.
+  # Set manually if you are not using auto-check.
+  targetVersion: ""
+
+  # Human-readable name shown in the popup (e.g. "macOS Sequoia")
+  macOSName: "macOS"
+
+  # "minor" = security/bug fix update (e.g. 15.4 → 15.4.1)
+  # "major" = full OS upgrade     (e.g. 15.x → 26.x)
+  # auto-check sets this automatically based on version comparison.
+  releaseType: "minor"
+
+  # Deadline in ISO 8601 format. Hard block fires after this date.
+  # Leave empty to use auto-calculated deadline from auto section below.
+  # Example: "2026-05-01T00:00:00Z"
+  deadline: ""
+
+  # Maximum number of times a user can click "Remind Me Later" on softNudge.
+  # Toast dismissals never count against this.
+  maxDeferrals: 5
+
+  # How often the toast corner notification appears (seconds)
+  # Default: 3600 = every 1 hour
+  # Examples:
+  #   1800  = every 30 minutes
+  #   3600  = every 1 hour   ← default
+  #   7200  = every 2 hours
+  #   14400 = every 4 hours
+  toastIntervalSeconds: 3600    # 1 hour — toast between nudges
+
+  # How often the softNudge/hardBlock popup appears (seconds)
+  # This is separate from the toast — the nudge is the blocking popup
+  # that requires a click. Default 86400 = once every 24 hours.
+  # Changing this is not recommended below 3600 (1 hour).
+  nudgeIntervalSeconds: 86400  # 24 hours — softNudge once per day
+
+  # After deadline: run startosinstall silently without showing any popup.
+  # Use with caution — machine will reboot without warning.
+  silentInstallAfterDeadline: false
+
+  # Pass --forcequitapps to startosinstall (closes open apps before install)
+  forceRestartAfterInstall: false
+
+  # Prompt Apple Silicon users for their password before startosinstall
+  requirePasswordOnAppleSilicon: true
+
+  # GitHub releases API URL for push-cli self-update
+  # Example: "https://api.github.com/repos/your-org/push/releases/latest"
+  # Leave empty to disable self-update
+  selfUpdateURL: ""
+
+
+# ── UI / Branding ───────────────────────────────────────────────────────────────
+ui:
+  # Title shown in the popup header
+  appName: "Software Update Required"
+
+  # Your organization name (optional)
+  orgName: ""
+
+  # Path to a custom .icns or .png logo (optional)
+  # Leave empty to use the bundled PUSH icon
+  logoPath: ""
+
+  # SF Symbol name to use as icon instead of logo (optional)
+  # Example: "laptopcomputer" — only used if logoPath is empty
+  sfSymbolName: ""
+
+  # Accent color (hex) used for buttons, version pills, progress bars
+  accentColorHex: "#0A84FF"
+
+  # Popup width in points
+  popupWidth: 540
+
+  # IT contact info shown at the bottom of every popup
+  itContactEmail: ""
+  itContactPhone: ""
+  helpURL: ""
+
+  # ── Messages ─────────────────────────────────────────────────────────────────
+  # Rich text supported:
+  #   \n       = line break
+  #   \n\n     = paragraph gap
+  #   - item   = bullet point
+
+  minorMessage: "A required macOS security update is available. Please install it at your earliest convenience.\n\nThis update includes:\n- Security patches\n- Performance improvements\n- Bug fixes"
+
+  majorMessage: "A major macOS upgrade is required by IT. Please save your work and begin the upgrade today.\n\nWhat to expect:\n- The upgrade takes 45–60 minutes\n- Your files and apps will be preserved\n- Your Mac will restart automatically"
+
+  deadlineMessage: "Your Mac must be updated immediately.\n\nSave your work and click Install Now to begin. The update takes 45–60 minutes."
+
+  downloadingMessage: "Downloading the macOS update in the background.\n\nPlease keep your Mac plugged in and do not shut it down."
+
+  installingMessage: "Installation in progress. This takes 45–60 minutes.\n\nPlease keep your Mac powered on."
+
+  alreadyUpToDateMessage: "Your Mac is running the required version of macOS. No action needed."
+
+  # ── Deferral reason prompt ───────────────────────────────────────────────────
+  # When true, user must select a reason before clicking Remind Me Later
+  requireDeferralReason: false
+
+  # Reasons shown in the deferral prompt
+  # deferralReasons:
+  #   - "I am busy right now"
+  #   - "I am in a meeting"
+  #   - "I am traveling"
+  #   - "I need IT support"
+  #   - "Other"
+
+  # ── Button labels ─────────────────────────────────────────────────────────────
+  installMinorButtonLabel: "Install Now"
+  installMajorButtonLabel: "Begin Upgrade"
+  deferButtonLabel: "Remind Me Later"
+
+  # ── Hard block fullscreen mode ────────────────────────────────────────────────
+  # When true: hardBlock covers all displays with a blurred frosted overlay.
+  # Users cannot interact with any app until they click Install Now.
+  hardBlockFullscreen: false
+
+
+# ── Toast notification ──────────────────────────────────────────────────────────
+toast:
+  # Corner position: topRight | topLeft | bottomRight | bottomLeft
+  position: "topRight"
+
+  # Toast width in points
+  width: 420
+
+  # Distance from screen edge in points
+  screenMargin: 16
+
+  # Corner radius
+  cornerRadius: 16
+
+  # Show the X close button on the toast
+  showCloseButton: true
+
+  # Show the "Later" button on the toast
+  showDeferButton: true
+
+  # Sound played when the toast appears. macOS system sounds:
+  # Funk | Basso | Blow | Bottle | Frog | Glass | Hero | Morse | Ping | Pop | Purr | Sosumi | Tink
+  # Set to "" to disable sound.
+  soundName: "Funk"
+  # Custom toast body. Leave empty to use the default personalized message.
+  # Use \\n for line breaks, \\n\\n for paragraphs, - for bullet points.
+  message: ""
+
+  # Button labels on the toast
+  installButtonLabel: "Install Now"
+  message: ""  # Custom toast body. Leave empty to use the default message. Use \n for line breaks, - for bullets
+  deferButtonLabel: "Later"
+
+  # Optional custom message for the toast (overrides minorMessage/majorMessage)
+  # message: "A macOS update is ready. Install at your convenience."
+
+
+# ── Preflight checks ────────────────────────────────────────────────────────────
+preflight:
+  # How many minutes to wait for AC power before timing out (exit code 4)
+  powerCheckTimeoutMinutes: 5
+
+  # Minimum free disk space required before downloading (GB)
+  # Use at least 35 GB for major OS upgrades
+  minDiskSpaceGB: 40  # 40 GB minimum — installer needs ~18 GB on top of download space
+
+  # URL to open when user clicks "Open Storage Settings"
+  # Leave empty to use the default macOS Storage settings panel
+  diskSpaceLearnMoreURL: ""
+
+  # Minimum battery percentage required before installing (0 = disabled)
+  # Machine must be on AC power AND above this threshold
+  minBatteryPercent: 0
+
+  # Check Apple CDN reachability before attempting download
+  checkNetworkReachability: true
+
+  # Skip popups entirely when user is on VPN (some VPNs slow downloads)
+  skipOnVPN: false
+
+
+# ── Auto-detection ──────────────────────────────────────────────────────────────
+auto:
+  # Enable auto-check (runs via LaunchDaemon on schedule)
+  enabled: true
+
+  # Set the minimum major macOS version to enforce across your fleet.
+  # PUSH automatically determines if each machine needs a major upgrade
+  # or just a minor security update based on what it is currently running.
+  #
+  #   Machine on 15.x  → major upgrade flow  → "Begin Upgrade" button
+  #   Machine on 26.x but behind → minor update flow → "Install Now" button
+  #   Machine on 26.latest → compliant, no popup
+  #
+  # Set to 26 to enforce macOS 26 across all Macs.
+  # Leave 0 to rely solely on update.targetVersion instead.
+  enforceMinimumMajorVersion: 0
+
+  # Only enforce minor updates — ignore major OS upgrades entirely
+  minorOnly: false
+
+  # Skip beta and release candidate builds
+  skipBetas: true
+
+  # Days from first detection until deadline (minor updates)
+  minorDeadlineDays: 5
+
+  # Days from first detection until deadline (major upgrades)
+  majorDeadlineDays: 30
+
+  # Max deferrals allowed for minor updates
+  minorMaxDeferrals: 5
+
+  # Max deferrals allowed for major upgrades
+  majorMaxDeferrals: 3
+
+  # Specific versions to skip
+  # skipVersions: ["15.3.1"]
+
+  # Webhook URL for admin Slack/Teams notifications on first detection
+  adminWebhookURL: ""
+
+  # Send webhook notification when a new update is first detected
+  notifyAdminOnDetection: false
+
+
+# ── Schedule ────────────────────────────────────────────────────────────────────
+schedule:
+  # Only show popups during these hours (24h format, local time)
+  # Prevents nudging users outside business hours
+  alertStartHour: 8
+  alertEndHour: 18
+
+  # Skip showing popups on Saturday and Sunday
+  skipWeekends: true
+
+  # Skip popups when the user is in a meeting or presenting.
+  # Detects: camera/mic in use, screen sharing, and known conferencing apps
+  # (Zoom, Teams, Webex, Google Meet, Slack, Discord, FaceTime, Loom, OBS)
+  # Hard block still fires after deadline even during meetings.
+  skipDuringMeetings: true
+
+  # Skip nudge and toast popups when the machine is on VPN.
+  # NOTE: this only suppresses the UI popups — it does NOT block downloads or
+  # installs. To block downloads/installs on VPN use preflight.skipOnVPN instead.
+  # Both can be true at the same time for different behaviors.
+  skipOnVPN: false
+
+
+# ── DDM (Apple Declarative Device Management) ──────────────────────────────────
+ddm:
+  # If DDM is actively managing an update, PUSH will step aside
+  enabled: true
+
+
+# ── Jamf integration ────────────────────────────────────────────────────────────
+jamf:
+  url: ""
+  # Extension Attribute name in Jamf Pro to receive compliance status
+  eaName: "OS Update Compliance"
+  binaryPath: "/usr/local/bin/jamf"
+  # Submit EA after every auto-check run
+  reportEAAfterCheck: true
+  # OAuth (client credentials) — recommended for Jamf Pro 10.48+
+  clientId: ""
+  clientSecret: ""
+  # Legacy API account (used if clientId/clientSecret are empty)
+  accountName: ""
+  accountPassword: ""
+  # Computer ID override — auto-detected via serial number if empty
+  computerId: ""
+
+# ── Local auth for Apple Silicon ────────────────────────────────────────────────
+# Local admin credentials used for softwareupdate/startosinstall --user/--stdinpass.
+# If empty, PUSH will prompt the logged-in user for their password at install time.
+# WARNING: storing passwords in plain text is a security risk.
+# Prefer leaving these empty and using the interactive password prompt instead.
+auth:
+  localAccount: ""
+  localPassword: ""
+
+
+# ── Logging ─────────────────────────────────────────────────────────────────────
+logging:
+  # Rotate push.log when it exceeds this size (MB)
+  maxLogSizeMB: 10
+
+  # How many rotated log files to keep (push.log.1, push.log.2, ...)
+  maxRotatedLogs: 5
+
+
+# ── Debug / Testing ─────────────────────────────────────────────────────────────
+debug:
+  # Dry run: detect and report but do not write config or show popups
+  dryRun: false
+
+  # Override toast interval for testing (minutes, 0 = use real 1-hour interval)
+  # Example: 1 = toast fires every 1 minute instead of every hour
+  testToastIntervalMinutes: 0
+
+  # Override nudge interval for testing (minutes, 0 = use real 24-hour interval)
+  # Example: 2 = softNudge fires every 2 minutes instead of every 24 hours
+  testNudgeIntervalMinutes: 0

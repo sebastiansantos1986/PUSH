@@ -1,0 +1,35 @@
+# Xcode
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivefile
+*.xccheckout
+*.xcscmblueprint
+.DS_Store
+
+# Build artifacts
+build/
+*.o
+*.d
+*.a
+*.dylib
+
+# Keys and secrets — never commit these
+config.yaml.local
+*.p12
+*.cer
+*.mobileprovision
+
+# Logs and state — machine-specific
+logs/
+state.json
+push-cli.log
+push.log
+
+# Temp files
+/tmp/push-*
+*.partial
