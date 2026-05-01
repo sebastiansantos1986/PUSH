@@ -1,35 +1,25 @@
 # Xcode
-*.xcworkspace
-xcuserdata/
 DerivedData/
-*.moved-aside
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivefile
-*.xccheckout
-*.xcscmblueprint
+build/
+xcuserdata/
+*.xcuserstate
+.swiftpm/
+
+# macOS
 .DS_Store
+._*
+
+# Local runtime — should never be committed
+state.json
+*.log
+logs/
 
 # Build artifacts
-build/
-*.o
-*.d
-*.a
-*.dylib
+*.pkg
+push-cli
+push-ui.app/
+*.dSYM/
 
-# Keys and secrets — never commit these
-config.yaml.local
-*.p12
-*.cer
-*.mobileprovision
-
-# Logs and state — machine-specific
-logs/
-state.json
-push-cli.log
-push.log
-
-# Temp files
-/tmp/push-*
-*.partial
+# Editor
+.vscode/
+.idea/
