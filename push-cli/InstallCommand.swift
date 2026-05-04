@@ -897,6 +897,11 @@ echo "DONE" > "\(doneFlag)"
                 cliLog("[Install] Triggering jamf recon post-install")
                 shell("\"\(config.jamf.binaryPath)\" recon 2>/dev/null")
             }
+            // Compliance wallpaper — force the compliant variant immediately,
+            // even though the actual reboot is pending. The Mac is now on the
+            // target version (post-startosinstall the bits are committed).
+            // applyForce ignores the transition tracker so it always fires here.
+            WallpaperManager(config: config).applyForce(.compliant)
         } else {
             cliLog("[Install] startosinstall may have failed. Log tail:\n\(finalLog.components(separatedBy: "\n").suffix(15).joined(separator: "\n"))")
             shell("pkill -x push-ui 2>/dev/null || true")

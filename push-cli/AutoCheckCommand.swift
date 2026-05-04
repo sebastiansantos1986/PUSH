@@ -162,6 +162,14 @@ struct AutoCheckCommand {
             } else {
                 cliSuccess("No updates found. \(current) is current.")
                 cliLog("[AutoCheck] No updates found")
+                // Mac is up to date — but uptime check still needs to run.
+                // This is precisely the case where a reboot reminder is most
+                // useful: nothing else will trigger a restart soon. Run
+                // uptime check directly here since runNudgeSchedule is gated
+                // on having an update target.
+                if !isDryRun, config.uptime.enabled {
+                    performUptimeCheck(config: config)
+                }
             }
             exit(0)
         }
@@ -586,12 +594,18 @@ struct AutoCheckCommand {
 
         // Jamf EA report
         let current = currentMacOSVersion()
+        let isCompliant = versionGTE(current, config.update.targetVersion)
         notifier.reportJamfEA(
-            compliant:  versionGTE(current, config.update.targetVersion),
+            compliant:  isCompliant,
             current:    current,
             target:     config.update.targetVersion,
             deferrals:  state.deferralCount
         )
+
+        // Compliance wallpaper — only changes if state transitioned. Honors
+        // wallpaperEnabled in config, no-op if disabled.
+        let desiredWallpaper: WallpaperState = isCompliant ? .compliant : .nonCompliant
+        WallpaperManager(config: config).applyIfStateChanged(desiredWallpaper)
 
         try? saveState(state)
     }

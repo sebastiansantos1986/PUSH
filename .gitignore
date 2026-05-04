@@ -4,21 +4,22 @@ build/
 xcuserdata/
 *.xcuserstate
 .swiftpm/
+PUSH.xcodeproj/project.xcworkspace/
+PUSH.xcodeproj/xcuserdata/
 
 # macOS
 .DS_Store
 ._*
 
-# Local runtime — should never be committed
+# Local runtime - should never be committed
 state.json
 *.log
 logs/
 
 # Build artifacts
 *.pkg
-push-cli
-push-ui.app/
 *.dSYM/
+push-ui.app/
 
 # Editor
 .vscode/

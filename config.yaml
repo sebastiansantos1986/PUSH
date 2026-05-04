@@ -300,6 +300,29 @@ uptime:
   skipIfOSUpdateImminentDays: 3
 
 
+# ── Compliance signaling ───────────────────────────────────────────────────────
+# Sets the desktop wallpaper based on OS update compliance state. Compliant Mac
+# shows one wallpaper, non-compliant Mac shows another. Wallpaper changes only
+# fire on state transitions, not on every auto-check, so users keep any custom
+# wallpaper they set in between transitions.
+#
+# Requires desktoppr (https://github.com/scriptingosx/desktoppr). If desktoppr
+# isn't installed, PUSH lazy-installs it from the bundled .pkg on first apply.
+#
+# Default wallpaperEnabled is FALSE so existing deployments don't surprise
+# users. Flip to true once your wallpaper images are in place.
+compliance:
+  wallpaperEnabled: false
+  compliantWallpaper:    "/Library/Management/PUSH/Compliance-Background/compliant.jpg"
+  nonCompliantWallpaper: "/Library/Management/PUSH/Compliance-Background/non-compliant.jpg"
+  # Hex color (no #) used as background when image doesn't fully cover the screen
+  wallpaperBackgroundColor: "020C19"
+  # desktoppr scale mode: fit | fill | stretch | center | tile
+  wallpaperScale: "fit"
+  desktopprPath:    "/usr/local/bin/desktoppr"
+  desktopprPkgPath: "/Library/Management/PUSH/Compliance-Background/desktoppr.pkg"
+
+
 # ── Jamf integration ────────────────────────────────────────────────────────────
 jamf:
   url: ""

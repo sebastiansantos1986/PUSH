@@ -112,6 +112,20 @@ struct ConfigCommand {
         case "toast.installButtonLabel":           return config.toast.installButtonLabel
         case "toast.deferButtonLabel":             return config.toast.deferButtonLabel
         case "update.toastIntervalSeconds":        return "\(config.update.toastIntervalSeconds)"
+        case "uptime.enabled":                     return "\(config.uptime.enabled)"
+        case "uptime.warningThresholdDays":        return "\(config.uptime.warningThresholdDays)"
+        case "uptime.forceThresholdDays":          return "\(config.uptime.forceThresholdDays)"
+        case "uptime.maxDeferrals":                return "\(config.uptime.maxDeferrals)"
+        case "uptime.promptIntervalDays":          return "\(config.uptime.promptIntervalDays)"
+        case "uptime.forceTimerSeconds":           return "\(config.uptime.forceTimerSeconds)"
+        case "uptime.skipDuringMeeting":           return "\(config.uptime.skipDuringMeeting)"
+        case "compliance.wallpaperEnabled":         return "\(config.compliance.wallpaperEnabled)"
+        case "compliance.compliantWallpaper":       return config.compliance.compliantWallpaper
+        case "compliance.nonCompliantWallpaper":    return config.compliance.nonCompliantWallpaper
+        case "compliance.wallpaperBackgroundColor": return config.compliance.wallpaperBackgroundColor
+        case "compliance.wallpaperScale":           return config.compliance.wallpaperScale
+        case "compliance.desktopprPath":            return config.compliance.desktopprPath
+        case "compliance.desktopprPkgPath":         return config.compliance.desktopprPkgPath
         default: return nil
         }
     }

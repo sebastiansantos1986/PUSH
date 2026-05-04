@@ -12,11 +12,12 @@ struct CLIConfig: Codable {
     var auto:      CLIAutoConfig      = .init()
     var schedule:  CLIScheduleConfig  = .init()
     var ddm:       CLIDDMConfig       = .init()
-    var jamf:      CLIJamfConfig      = .init()
-    var auth:      CLIAuthConfig      = .init()
-    var uptime:    CLIUptimeConfig    = .init()
-    var debug:     CLIDebugConfig     = .init()
-    var logging:   CLILoggingConfig   = .init()
+    var jamf:       CLIJamfConfig       = .init()
+    var auth:       CLIAuthConfig       = .init()
+    var uptime:     CLIUptimeConfig     = .init()
+    var compliance: CLIComplianceConfig = .init()
+    var debug:      CLIDebugConfig      = .init()
+    var logging:    CLILoggingConfig    = .init()
 }
 
 struct CLIUpdateConfig: Codable {
@@ -153,6 +154,31 @@ struct CLIUptimeConfig: Codable {
     var skipIfOSUpdateImminentDays: Int = 3
 }
 
+/// Compliance signaling — sets the desktop wallpaper based on OS update
+/// compliance state, so users get a passive visual cue without an extra popup.
+/// Compliant Mac → "compliant" wallpaper. Non-compliant Mac → "non-compliant"
+/// wallpaper. Wallpaper changes only fire on state TRANSITIONS, not every
+/// auto-check, so the user keeps any custom wallpaper between transitions.
+///
+/// Requires desktoppr — bundled at desktopprPkgPath, lazy-installed on first
+/// wallpaper apply.
+struct CLIComplianceConfig: Codable {
+    /// Master switch. Default false so existing deployments don't surprise users.
+    /// Flip to true once wallpapers are in place and you want visual signaling.
+    var wallpaperEnabled:        Bool   = false
+    var compliantWallpaper:      String = "/Library/Management/PUSH/Compliance-Background/compliant.jpg"
+    var nonCompliantWallpaper:   String = "/Library/Management/PUSH/Compliance-Background/non-compliant.jpg"
+    /// Hex color (no #) used as the desktop background when the image doesn't
+    /// fully cover the screen (letterboxing).
+    var wallpaperBackgroundColor: String = "020C19"
+    /// desktoppr scale mode: fit | fill | stretch | center | tile
+    var wallpaperScale:          String = "fit"
+    /// Where desktoppr is installed (or expected to be).
+    var desktopprPath:           String = "/usr/local/bin/desktoppr"
+    /// Bundled installer for lazy-install if desktoppr is missing.
+    var desktopprPkgPath:        String = "/Library/Management/PUSH/Compliance-Background/desktoppr.pkg"
+}
+
 struct CLIJamfLapsConfig: Codable {
     var enabled:       Bool   = false
     var accountName:   String = ""       // e.g. "CasperLocalAdmin"
@@ -215,6 +241,11 @@ struct CLIDeferralState: Codable {
     var uptimeDeferralCount:     Int    = 0
     var uptimeNextPromptDate:    Date   = .distantPast
     var uptimeLastBootTimestamp: Double = 0       // sysctl kern.boottime sec
+
+    /// Compliance wallpaper transition tracking. Set to "compliant" or
+    /// "non-compliant" after wallpaper applied. Empty string = not yet set.
+    /// Used to avoid re-applying the same wallpaper on every auto-check.
+    var lastAppliedWallpaperState: String = ""
 }
 
 // MARK: - Load
@@ -351,6 +382,16 @@ extension CLIConfig {
             c.uptime.forceTimerSeconds          = int(u, "forceTimerSeconds",          600)
             c.uptime.skipDuringMeeting          = boo(u, "skipDuringMeeting",          true)
             c.uptime.skipIfOSUpdateImminentDays = int(u, "skipIfOSUpdateImminentDays", 3)
+        }
+
+        if let cm = root["compliance"] as? [String: Any] {
+            c.compliance.wallpaperEnabled         = boo(cm, "wallpaperEnabled",         false)
+            c.compliance.compliantWallpaper       = str(cm, "compliantWallpaper",       c.compliance.compliantWallpaper)
+            c.compliance.nonCompliantWallpaper    = str(cm, "nonCompliantWallpaper",    c.compliance.nonCompliantWallpaper)
+            c.compliance.wallpaperBackgroundColor = str(cm, "wallpaperBackgroundColor", "020C19")
+            c.compliance.wallpaperScale           = str(cm, "wallpaperScale",           "fit")
+            c.compliance.desktopprPath            = str(cm, "desktopprPath",            "/usr/local/bin/desktoppr")
+            c.compliance.desktopprPkgPath         = str(cm, "desktopprPkgPath",         c.compliance.desktopprPkgPath)
         }
 
         if let j = root["jamf"] as? [String: Any] {

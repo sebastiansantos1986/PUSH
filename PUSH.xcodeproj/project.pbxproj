@@ -11,6 +11,8 @@
 		D071844F2FA2875900AF3482 /* JamfLAPSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D071844D2FA2875900AF3482 /* JamfLAPSClient.swift */; };
 		D0F102F52FA40480007894F8 /* UptimeCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F102F42FA40480007894F8 /* UptimeCheck.swift */; };
 		D0F102F72FA40504007894F8 /* AutoCheckCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */; };
+		D0F459B02FA90C8900F0EB18 /* WallpaperManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */; };
+		D0F459B12FA90C8900F0EB18 /* WallpaperCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */; };
 		D0F7DEE52FA2B7040098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */; };
 		D0F7DEE62FA2B7040098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */; };
 		D0F7DEE82FA2B7140098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */; };
@@ -53,6 +55,8 @@
 		D071844D2FA2875900AF3482 /* JamfLAPSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JamfLAPSClient.swift; sourceTree = "<group>"; };
 		D0F102F42FA40480007894F8 /* UptimeCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UptimeCheck.swift; sourceTree = "<group>"; };
 		D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoCheckCommand.swift; sourceTree = "<group>"; };
+		D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCommand.swift; sourceTree = "<group>"; };
+		D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperManager.swift; sourceTree = "<group>"; };
 		D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPasswordKeychain.swift; sourceTree = "<group>"; };
 		D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPasswordKeychain.swift; sourceTree = "<group>"; };
 		F101 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -115,6 +119,8 @@
 		GRP_CLI /* push-cli */ = {
 			isa = PBXGroup;
 			children = (
+				D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */,
+				D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */,
 				D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */,
 				D0F102F42FA40480007894F8 /* UptimeCheck.swift */,
 				D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */,
@@ -318,6 +324,8 @@
 			files = (
 				U201 /* main.swift in Sources */,
 				U202 /* CLIHelpers.swift in Sources */,
+				D0F459B02FA90C8900F0EB18 /* WallpaperManager.swift in Sources */,
+				D0F459B12FA90C8900F0EB18 /* WallpaperCommand.swift in Sources */,
 				U203 /* CLIConfig.swift in Sources */,
 				U204 /* AutoCheckCommand.swift in Sources */,
 				U205 /* StatusCommand.swift in Sources */,
