@@ -1,0 +1,158 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PUSH — Proactive Update Scheduling Helper                                  ║
+# ║  Default Configuration — customize via Jamf post-install script             ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+update:
+  targetVersion: ""
+  macOSName: "macOS"
+  releaseType: "minor"
+  deadline: ""
+  maxDeferrals: 5
+  toastIntervalSeconds: 3600    # 1 hour — toast between nudges
+  nudgeIntervalSeconds: 86400  # 24 hours — softNudge once per day
+  silentInstallAfterDeadline: false
+  autoInstallAfterDeadline: true     # Auto-download+install when deadline passes (shows progress UI, blocks quit)
+  forceRestartAfterInstall: false
+  requirePasswordOnAppleSilicon: true
+  selfUpdateURL: ""
+
+ui:
+  appName: "Software Update Required"
+  orgName: ""
+  logoPath: ""
+  sfSymbolName: ""
+  accentColorHex: "#0A84FF"
+  popupWidth: 540
+  itContactEmail: ""
+  itContactPhone: ""
+  helpURL: ""
+  minorMessage: "A required macOS security update is available. Please install it at your earliest convenience.\n\nThis update includes:\n- Security patches\n- Performance improvements\n- Bug fixes"
+  majorMessage: "A major macOS upgrade is required by IT. Please save your work and begin the upgrade today.\n\nWhat to expect:\n- The upgrade takes 45–60 minutes\n- Your files and apps will be preserved\n- Your Mac will restart automatically"
+  deadlineMessage: "Your Mac must be updated immediately.\n\nSave your work and click Install Now to begin. The update takes 45–60 minutes."
+  downloadingMessage: "Downloading the macOS update in the background.\n\nPlease keep your Mac plugged in and do not shut it down."
+  installingMessage: "Installation in progress. This takes 45–60 minutes.\n\nPlease keep your Mac powered on."
+  alreadyUpToDateMessage: "Your Mac is running the required version of macOS. No action needed."
+  # Shown during forced automatic install (autoInstallAfterDeadline: true)
+  # Leave empty to use the smart default message
+  forcedInstallMessage: ""
+  # Overrides the "What to expect" bullet points during forced install
+  # Use \n to separate each bullet. Leave empty for the default bullets.
+  forcedInstallNotice: ""
+  installMinorButtonLabel: "Install Now"
+  installMajorButtonLabel: "Begin Upgrade"
+  deferButtonLabel: "Remind Me Later"
+  requireDeferralReason: false
+  hardBlockFullscreen: false
+
+toast:
+  position: "topRight"
+  width: 420
+  screenMargin: 16
+  cornerRadius: 16
+  showCloseButton: true
+  showDeferButton: true
+  installButtonLabel: "Install Now"
+  deferButtonLabel: "Later"
+  soundName: "Funk"
+  # Custom toast body. Leave empty to use the default personalized message.
+  # Use \n for line breaks, \n\n for paragraphs, - for bullet points.
+  # Example: 'Hello!\n\nmacOS Tahoe is available.\n\n- Enhanced security\n- Better performance'
+  message: ""
+
+preflight:
+  powerCheckTimeoutMinutes: 5
+  minDiskSpaceGB: 40  # 40 GB minimum — installer needs ~18 GB on top of download space
+  diskSpaceLearnMoreURL: ""
+  minBatteryPercent: 0
+  checkNetworkReachability: true
+  skipOnVPN: false
+
+auto:
+  enabled: true
+  enforceMinimumMajorVersion: 0
+  minorOnly: false
+  skipBetas: true
+  minorDeadlineDays: 5
+  majorDeadlineDays: 7
+  minorMaxDeferrals: 5
+  majorMaxDeferrals: 7
+  adminWebhookURL: ""
+  notifyAdminOnDetection: false
+  notifyOnDeadlineHit: true
+  notifyOnDeferralExhausted: true
+  notifyOnInstallComplete: true
+  autoInstallNonSystemUpdates: true
+
+schedule:
+  alertStartHour: 8
+  alertEndHour: 18
+  skipWeekends: true
+  skipDuringMeetings: true
+  # Skip nudge/toast popups on VPN. Does NOT block installs (use preflight.skipOnVPN for that).
+  skipOnVPN: false
+  # Defer post-deadline forced install when actively screen-sharing or in a live meeting
+  skipInstallDuringScreenShare: true
+
+ddm:
+  enabled: true
+
+# Uptime monitoring — see PUSH-fixed/config.yaml for full docs
+uptime:
+  enabled: true
+  warningThresholdDays: 14
+  forceThresholdDays: 20
+  maxDeferrals: 3
+  promptIntervalDays: 1
+  forceTimerSeconds: 600
+  skipDuringMeeting: true
+  # Deprecated — uptime prompts now auto-skip whenever any OS update is pending
+  skipIfOSUpdateImminentDays: 3
+
+# Compliance wallpaper — see PUSH-fixed/config.yaml for full docs
+# wallpaperEnabled: true so pilot Macs get the visual signaling immediately on
+# install. Toggle off via `push-cli wallpaper disable` if a user complains.
+compliance:
+  wallpaperEnabled: true
+  compliantWallpaper:    "/Library/Management/PUSH/Compliance-Background/compliant.jpg"
+  nonCompliantWallpaper: "/Library/Management/PUSH/Compliance-Background/non-compliant.jpg"
+  wallpaperBackgroundColor: "020C19"
+  wallpaperScale: "fit"
+  desktopprPath:    "/usr/local/bin/desktoppr"
+  desktopprPkgPath: "/Library/Management/PUSH/Compliance-Background/desktoppr.pkg"
+
+jamf:
+  url: ""
+  eaName: "OS Update Compliance"
+  binaryPath: "/usr/local/bin/jamf"
+  reportEAAfterCheck: true
+  # OAuth (client credentials) — recommended for Jamf Pro 10.48+
+  clientId: ""
+  clientSecret: ""
+  # Legacy API account (used if clientId/clientSecret are empty)
+  accountName: ""
+  accountPassword: ""
+  # Computer ID override — auto-detected via serial number if empty
+  computerId: ""
+
+# Jamf LAPS integration — see PUSH-fixed/config.yaml for full docs
+laps:
+  enabled: false
+  accountName: "CasperLocalAdmin"
+  clientId: ""
+  clientSecret: ""     # prefer: sudo push-cli jamf set-laps-secret
+
+# Local auth for Apple Silicon
+# If empty, PUSH will prompt the logged-in user at install time (recommended).
+auth:
+  localAccount: ""
+  localPassword: ""
+
+logging:
+  maxLogSizeMB: 10
+  maxRotatedLogs: 5
+
+debug:
+  dryRun: false
+  testToastIntervalMinutes: 0
+  testNudgeIntervalMinutes: 0

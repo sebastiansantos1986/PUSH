@@ -1,0 +1,19 @@
+#!/bin/bash
+# preinstall — PUSH pkg pre-install script
+# Unloads existing daemon and stops any running push-ui before installing
+
+# Unload daemon if running — use bootout (replaces deprecated launchctl unload)
+PLIST="/Library/LaunchDaemons/com.push.autoupdate.plist"
+if /bin/launchctl print system/com.push.autoupdate &>/dev/null; then
+    /bin/launchctl bootout system "$PLIST" 2>/dev/null || \
+        /bin/launchctl unload "$PLIST" 2>/dev/null || true
+fi
+
+# Kill any running push-ui instances
+pkill -x push-ui 2>/dev/null || true
+
+# Create directory structure
+mkdir -p /Library/Management/PUSH/logs
+mkdir -p /Library/Management/PUSH/downloads
+
+exit 0

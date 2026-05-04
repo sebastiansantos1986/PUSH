@@ -1,0 +1,64 @@
+#!/bin/bash
+# postinstall — PUSH pkg post-install script
+# Sets permissions, installs mist-cli, loads daemon, creates symlink
+
+LOG="/Library/Management/PUSH/logs/push.log"
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [postinstall] $1" >> "$LOG"; echo "$1"; }
+
+# Ensure directories exist before writing to log
+mkdir -p /Library/Management/PUSH/logs
+mkdir -p /Library/Management/PUSH/downloads
+
+# Fix ownership
+chown -R root:wheel /Library/Management/PUSH
+chown root:wheel /Library/LaunchDaemons/com.push.autoupdate.plist
+chmod 755 /Library/Management/PUSH
+chmod 755 /Library/Management/PUSH/push-cli
+chmod 644 /Library/Management/PUSH/config.yaml
+chmod 644 /Library/LaunchDaemons/com.push.autoupdate.plist
+chmod 755 /Library/Management/PUSH/logs
+chmod 755 /Library/Management/PUSH/downloads
+
+# Fix app bundle ownership
+if [[ -d /Library/Management/PUSH/push-ui.app ]]; then
+    chown -R root:wheel /Library/Management/PUSH/push-ui.app
+    chmod 755 /Library/Management/PUSH/push-ui.app
+fi
+
+# ── Install mist-cli ───────────────────────────────────────────────────────────
+# Use glob to match any mist-cli*.pkg regardless of version number in filename
+MIST_PKG=$(ls /Library/Management/PUSH/mist-cli*.pkg 2>/dev/null | head -1)
+MIST_BIN="/usr/local/bin/mist"
+
+if [[ -n "$MIST_PKG" && -f "$MIST_PKG" ]]; then
+    log "Found mist-cli pkg: $MIST_PKG"
+    if [[ -x "$MIST_BIN" ]]; then
+        CURRENT_VER=$("$MIST_BIN" --version 2>/dev/null | awk '{print $NF}')
+        log "mist-cli already installed (version: $CURRENT_VER) — reinstalling bundled version"
+    fi
+    log "Installing mist-cli…"
+    if /usr/sbin/installer -pkg "$MIST_PKG" -target / >> "$LOG" 2>&1; then
+        MIST_VER=$("$MIST_BIN" --version 2>/dev/null | awk '{print $NF}')
+        log "mist-cli installed successfully (version: $MIST_VER)"
+    else
+        log "WARNING: mist-cli installation failed — major upgrades will fall back to softwareupdate"
+    fi
+else
+    log "WARNING: No mist-cli*.pkg found in /Library/Management/PUSH/ — major upgrades will fall back to softwareupdate"
+fi
+
+# Create symlink
+ln -sf /Library/Management/PUSH/push-cli /usr/local/bin/push-cli
+log "Symlink created: /usr/local/bin/push-cli"
+
+# ── Load LaunchDaemon ──────────────────────────────────────────────────────────
+PLIST="/Library/LaunchDaemons/com.push.autoupdate.plist"
+if /bin/launchctl print system/com.push.autoupdate &>/dev/null; then
+    /bin/launchctl bootout system "$PLIST" 2>/dev/null || true
+fi
+/bin/launchctl bootstrap system "$PLIST" 2>/dev/null || \
+    /bin/launchctl load "$PLIST" 2>/dev/null || true
+log "LaunchDaemon loaded"
+
+log "PUSH postinstall complete"
+exit 0
