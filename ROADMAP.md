@@ -78,6 +78,7 @@ Last updated: April 2026 — v1.1.0
 - [x] `self-update --check`
 - [x] `mdm push / download / check / recon / fix-swu`
 - [x] `grace grant / status / revoke`
+- [x] `reboot status / check / nudge / force / reset / now`
 - [x] `debug on / off / status`
 
 ### Deployment

@@ -168,6 +168,10 @@ uptime:                          # Reboot reminders for compliant Macs
   enabled: false
   warningThresholdDays: 14
   forceThresholdDays: 21
+  maxDeferrals: 3
+  promptIntervalDays: 1
+  forceTimerSeconds: 600
+  skipDuringMeeting: true
 ```
 
 ### Editing config
@@ -184,11 +188,24 @@ sudo push-cli config show
 
 ### Detection & compliance
 ```
-push-cli auto-check                 Run nudge schedule + Jamf EA report
+push-cli auto-check                 Run update check, reboot policy, and Jamf EA report
 push-cli auto-check --force         Bypass alert window, run immediately
 push-cli check                      Silent check — exits 0=compliant, 1=non-compliant
 push-cli status                     Show current compliance state
 ```
+
+### Reboot / uptime policy
+```
+push-cli reboot status              Show reboot policy, uptime, deferrals, next prompt
+push-cli reboot check               Evaluate policy: quiet, warning, or force
+push-cli reboot nudge               Show restart reminder popup for testing
+push-cli reboot nudge --restart     Restart after user clicks Restart Now
+push-cli reboot force --timer 300   Show forced restart countdown popup
+push-cli reboot reset               Clear reboot deferrals and prompt schedule
+push-cli reboot now --confirm       Restart this Mac immediately
+```
+
+When `uptime.enabled` is true, `auto-check` evaluates the reboot threshold even if macOS is already current. If the user clicks Later, PUSH waits `uptime.promptIntervalDays` before prompting again. After `uptime.maxDeferrals`, PUSH escalates to the forced restart countdown.
 
 ### Install
 ```

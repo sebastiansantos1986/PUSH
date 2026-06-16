@@ -4,7 +4,7 @@
 
 ```
 PUSH-deployment/
-├── build-pkg.sh                  Build script — creates PUSH-1.0.0.pkg
+├── build-pkg.sh                  Build script — creates PUSH-1.1.0.pkg
 ├── push-jamf-postinstall.sh      Jamf policy script — runs after pkg installs
 ├── push-uninstall.sh             Full removal script
 └── pkg-build/
@@ -35,7 +35,7 @@ For a signed pkg (required for notarization and some MDM profiles):
 bash build-pkg.sh --sign "Developer ID Installer: Your Name (TEAMID)"
 ```
 
-This outputs `PUSH-1.0.0.pkg`.
+This outputs `PUSH-1.1.0.pkg`.
 
 ---
 
@@ -58,7 +58,7 @@ HARD_BLOCK_FULLSCREEN="false"
 ## Step 3 — Upload to Jamf Pro
 
 1. **Upload the pkg:**
-   Jamf Pro → Settings → Packages → New → Upload `PUSH-1.0.0.pkg`
+   Jamf Pro → Settings → Packages → New → Upload `PUSH-1.1.0.pkg`
 
 2. **Upload the post-install script:**
    Jamf Pro → Settings → Scripts → New → paste `push-jamf-postinstall.sh`
@@ -79,7 +79,7 @@ Jamf Pro → Computers → Policies → New:
 | Name          | PUSH — Deploy Update Enforcement   |
 | Trigger       | Recurring Check-in                 |
 | Frequency     | Once per computer                  |
-| Packages      | PUSH-1.0.0.pkg                    |
+| Packages      | PUSH-1.1.0.pkg                    |
 | Scripts       | push-jamf-postinstall.sh (After)   |
 | Scope         | All Computers (or your smart group)|
 
@@ -116,12 +116,24 @@ push-cli --version
 # Check status
 push-cli status
 
+# Check reboot / uptime policy
+sudo push-cli reboot status
+sudo push-cli reboot check
+
+# Manually test the reboot reminder popup without restarting
+sudo push-cli reboot nudge
+
+# Test auto-check; this also evaluates reboot policy even when macOS is current
+sudo push-cli auto-check --force
+
 # Check LaunchDaemon is loaded
 sudo launchctl list | grep com.push
 
 # Check config was applied
 push-cli config get ui.orgName
 push-cli config get auto.enforceMinimumMajorVersion
+push-cli config get uptime.enabled
+push-cli config get uptime.warningThresholdDays
 ```
 
 ---
