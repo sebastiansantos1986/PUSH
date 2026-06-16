@@ -174,21 +174,26 @@ struct MDMPushCommand {
 
         // OAuth (client credentials) — preferred
         if !config.jamf.clientId.isEmpty && !config.jamf.clientSecret.isEmpty {
-            let (out, status) = shell("""
-                curl -s -w '\\n%{http_code}' --request POST '\(base)/api/oauth/token' \
-                  --header 'Content-Type: application/x-www-form-urlencoded' \
-                  --data-urlencode 'client_id=\(config.jamf.clientId)' \
-                  --data-urlencode 'grant_type=client_credentials' \
-                  --data-urlencode 'client_secret=\(config.jamf.clientSecret)'
-                """)
-            return parseToken(response: out, field: "access_token")
+            let body = "client_id=\(urlEncode(config.jamf.clientId))"
+                + "&grant_type=client_credentials"
+                + "&client_secret=\(urlEncode(config.jamf.clientSecret))"
+            let (data, status) = httpRequest(method: "POST",
+                                             url: "\(base)/api/oauth/token",
+                                             headers: ["Content-Type": "application/x-www-form-urlencoded"],
+                                             body: Data(body.utf8))
+            guard (200..<300).contains(status) else { return nil }
+            return parseToken(data: data, field: "access_token")
         }
 
         // Legacy account/password
         if !config.jamf.accountName.isEmpty && !config.jamf.accountPassword.isEmpty {
             let creds = "\(config.jamf.accountName):\(config.jamf.accountPassword)"
-            let (out, _) = shell("curl -s --request POST '\(base)/api/v1/auth/token' --user '\(creds)'")
-            return parseToken(response: out, field: "token")
+            let auth = Data(creds.utf8).base64EncodedString()
+            let (data, status) = httpRequest(method: "POST",
+                                             url: "\(base)/api/v1/auth/token",
+                                             headers: ["Authorization": "Basic \(auth)"])
+            guard (200..<300).contains(status) else { return nil }
+            return parseToken(data: data, field: "token")
         }
 
         return nil
@@ -224,6 +229,43 @@ struct MDMPushCommand {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = json[field] as? String else { return nil }
         return token
+    }
+
+    private func parseToken(data: Data, field: String) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = json[field] as? String else { return nil }
+        return token
+    }
+
+    private func httpRequest(method: String,
+                             url: String,
+                             headers: [String: String] = [:],
+                             body: Data? = nil) -> (Data, Int) {
+        guard let u = URL(string: url) else { return (Data(), 0) }
+        var request = URLRequest(url: u)
+        request.httpMethod = method
+        request.timeoutInterval = 30
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        request.httpBody = body
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var responseData = Data()
+        var statusCode = 0
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            responseData = data ?? Data()
+            statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            semaphore.signal()
+        }.resume()
+        semaphore.wait()
+        return (responseData, statusCode)
+    }
+
+    private func urlEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private func curlPost(url: String, token: String, body: Data) -> (String, Int) {

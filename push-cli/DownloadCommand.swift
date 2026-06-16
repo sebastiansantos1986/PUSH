@@ -71,17 +71,75 @@ struct DownloadCommand {
         let pwd     = config.auth.localPassword.isEmpty ? nil : config.auth.localPassword
         let acct    = config.auth.localAccount.isEmpty  ? nil : config.auth.localAccount
 
-        let cmd = softwareupdateDownloadCmd(label: label, password: pwd, account: acct, user: user)
         cliLog("[Download] Running: softwareupdate --download \"\(label)\" [as: \(user?.name ?? "root")]")
         cliPrint("Downloading via softwareupdate… (this may take a while)")
 
-        let (out, status) = shell(cmd)
+        let (out, status) = runSoftwareUpdateDownload(label: label,
+                                                      password: pwd,
+                                                      account: acct,
+                                                      user: user)
         if status == 0 {
             cliSuccess("Download complete: \(label)")
         } else {
             cliError("softwareupdate download failed (exit \(status))")
             cliLog("[Download] Output: \(out)")
             exit(1)
+        }
+    }
+
+    private func runSoftwareUpdateDownload(label: String,
+                                           password: String?,
+                                           account: String?,
+                                           user: (name: String, uid: Int)?) -> (String, Int32) {
+        let executable: String
+        var args: [String]
+        var stdinText: String? = nil
+
+        if isAppleSilicon(), let user {
+            executable = "/bin/launchctl"
+            args = [
+                "asuser", "\(user.uid)",
+                "/usr/bin/sudo", "-u", "root",
+                "/usr/sbin/softwareupdate",
+                "--download", label,
+                "--agree-to-license"
+            ]
+            if let password, let account, !account.isEmpty {
+                args += ["--user", account, "--stdinpass"]
+                stdinText = password + "\n"
+            }
+        } else {
+            executable = "/usr/sbin/softwareupdate"
+            args = ["--download", label, "--agree-to-license"]
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        let inputPipe: Pipe?
+        if stdinText != nil {
+            let pipe = Pipe()
+            process.standardInput = pipe
+            inputPipe = pipe
+        } else {
+            inputPipe = nil
+        }
+
+        do {
+            try process.run()
+            if let stdinText, let inputPipe {
+                inputPipe.fileHandleForWriting.write(Data(stdinText.utf8))
+                try? inputPipe.fileHandleForWriting.close()
+            }
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
+        } catch {
+            return ("\(error)", -1)
         }
     }
 

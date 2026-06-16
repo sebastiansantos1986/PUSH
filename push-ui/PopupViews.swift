@@ -1140,12 +1140,13 @@ struct PasswordView: View {
                     // Save to user's login keychain for future automatic installs.
                     // This is the disclosed behavior per the prompt text. Failure
                     // here is logged but doesn't block the install.
-                    saveUserPasswordToLoginKeychain(account: account, password: pwd)
-
-                    // Write to temp file and proceed
-                    if (try? pwd.write(toFile: "/tmp/push-password",
-                                       atomically: true, encoding: .utf8)) != nil {
+                    if saveUserPasswordToLoginKeychain(account: account, password: pwd) {
                         ctx.exit(.install)
+                    } else {
+                        password = ""
+                        errorMsg = "Could not save password securely. Please try again or contact IT."
+                        shaking  = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { shaking = false }
                     }
                 } else {
                     // Wrong password — shake field and show error
@@ -1189,11 +1190,18 @@ struct PasswordView: View {
     private func validatePassword(account: String, password: String) -> Bool {
         guard !account.isEmpty else { return true }
         let process = Process()
-        process.launchPath = "/bin/bash"
-        process.arguments  = ["-c", "dscl /Local/Default -authonly \"\(account)\" \"\(password)\" 2>/dev/null"]
-        process.launch()
-        process.waitUntilExit()
-        return process.terminationStatus == 0
+        process.launchPath = "/usr/bin/dscl"
+        process.arguments  = ["/Local/Default", "-authonly", account, password]
+        let devnull = FileHandle(forWritingAtPath: "/dev/null") ?? FileHandle.standardError
+        process.standardOutput = devnull
+        process.standardError  = devnull
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 }
 

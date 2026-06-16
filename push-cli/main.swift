@@ -17,6 +17,12 @@ func printHelp() {
 \u{001B}[1mSTATUS\u{001B}[0m
   status                  Full compliance report
   check                   Exit 0=compliant, 1=needs update, 2=error
+  reboot status           Show uptime restart policy and state
+  reboot check            Evaluate restart policy (quiet/warning/force)
+  reboot nudge            Show restart reminder popup now
+  reboot force            Show forced restart countdown popup now
+  reboot reset            Clear reboot deferrals and prompt schedule
+  reboot now --confirm    Restart this Mac now
 
 \u{001B}[1mCONFIG\u{001B}[0m
   config show             Print current config (YAML)
@@ -131,6 +137,13 @@ func printHelp() {
   sudo push-cli popup preflightDisk --disk-available 8.5 --disk-required 40
   sudo push-cli popup preflightPower                          AC power required
 
+  \u{001B}[2m# Reboot / Uptime Control\u{001B}[0m
+  sudo push-cli reboot status                                 Show reboot policy state
+  sudo push-cli reboot check                                  Evaluate reboot policy
+  sudo push-cli reboot nudge                                  Show reboot reminder popup
+  sudo push-cli reboot force --timer 300                      Show forced restart countdown
+  sudo push-cli reboot reset                                  Clear reboot deferral state
+
   \u{001B}[2m# State & Reset\u{001B}[0m
   sudo push-cli reset                                         Reset everything
   sudo push-cli reset --deferrals-only                        Reset deferral count only
@@ -166,6 +179,7 @@ switch command {
 case "auto-check":       AutoCheckCommand(args: rest).run()
 case "status":           StatusCommand(args: rest).run()
 case "check":            CheckCommand(args: rest).run()
+case "reboot":           RebootCommand(args: rest).run()
 case "config":           ConfigCommand(args: rest).run()
 case "popup":            PopupCommand(args: rest).run()
 case "install":          InstallWorkflow(config: (try? loadConfig()) ?? CLIConfig()).run()

@@ -30,7 +30,7 @@ struct ConfigCommand {
             exit(1)
         }
         let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? "(empty)"
-        cliPrint(content)
+        cliPrint(redactConfigContent(content))
     }
 
     // MARK: - Get
@@ -85,18 +85,25 @@ struct ConfigCommand {
         case "jamf.url":                          return config.jamf.url
         case "jamf.reportEAAfterCheck":           return "\(config.jamf.reportEAAfterCheck)"
         case "jamf.clientId":                     return config.jamf.clientId
-        case "jamf.clientSecret":                 return config.jamf.clientSecret
+        case "jamf.clientSecret":                 return redactedValue(config.jamf.clientSecret)
         case "jamf.accountName":                  return config.jamf.accountName
-        case "jamf.accountPassword":              return config.jamf.accountPassword
+        case "jamf.accountPassword":              return redactedValue(config.jamf.accountPassword)
         case "jamf.computerId":                   return config.jamf.computerId
         case "auth.localAccount":                 return config.auth.localAccount
-        case "auth.localPassword":                return config.auth.localPassword
+        case "auth.localPassword":                return redactedValue(config.auth.localPassword)
         case "preflight.minBatteryPercent":       return "\(config.preflight.minBatteryPercent)"
         case "preflight.checkNetworkReachability":return "\(config.preflight.checkNetworkReachability)"
         case "preflight.skipOnVPN":               return "\(config.preflight.skipOnVPN)"
         case "schedule.skipDuringMeetings":       return "\(config.schedule.skipDuringMeetings)"
         case "logging.maxLogSizeMB":              return "\(config.logging.maxLogSizeMB)"
         case "logging.maxRotatedLogs":            return "\(config.logging.maxRotatedLogs)"
+        case "uptime.enabled":                    return "\(config.uptime.enabled)"
+        case "uptime.warningThresholdDays":       return "\(config.uptime.warningThresholdDays)"
+        case "uptime.forceThresholdDays":         return "\(config.uptime.forceThresholdDays)"
+        case "uptime.maxDeferrals":               return "\(config.uptime.maxDeferrals)"
+        case "uptime.promptIntervalDays":         return "\(config.uptime.promptIntervalDays)"
+        case "uptime.forceTimerSeconds":          return "\(config.uptime.forceTimerSeconds)"
+        case "uptime.skipDuringMeeting":          return "\(config.uptime.skipDuringMeeting)"
         case "schedule.alertStartHour":            return "\(config.schedule.alertStartHour)"
         case "schedule.alertEndHour":              return "\(config.schedule.alertEndHour)"
         case "schedule.skipWeekends":              return "\(config.schedule.skipWeekends)"
@@ -212,8 +219,9 @@ struct ConfigCommand {
         yaml = lines.joined(separator: "\n")
         do {
             try yaml.write(toFile: cfgPath, atomically: true, encoding: .utf8)
-            cliSuccess("Set \(key) = \(formatted)")
-            cliLog("[Config] Set \(key) = \(formatted)")
+            let loggedValue = isSensitiveConfigKey(key) ? redactedValue(value) : formatted
+            cliSuccess("Set \(key) = \(loggedValue)")
+            cliLog("[Config] Set \(key) = \(loggedValue)")
         } catch {
             cliError("Failed to write config: \(error.localizedDescription)"); exit(1)
         }
@@ -259,4 +267,31 @@ struct ConfigCommand {
             exit(1)
         }
     }
+}
+
+private func isSensitiveConfigKey(_ key: String) -> Bool {
+    let lowered = key.lowercased()
+    return lowered.contains("password")
+        || lowered.contains("secret")
+        || lowered.contains("token")
+}
+
+private func redactedValue(_ value: String) -> String {
+    value.isEmpty ? "" : "(redacted)"
+}
+
+private func redactConfigContent(_ content: String) -> String {
+    let sensitiveFields = ["clientSecret", "accountPassword", "localPassword"]
+    return content.components(separatedBy: "\n").map { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.hasPrefix("#"),
+              let field = sensitiveFields.first(where: { trimmed.hasPrefix("\($0):") }),
+              let colon = line.firstIndex(of: ":")
+        else { return line }
+
+        let currentValue = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        guard !currentValue.isEmpty, currentValue != "\"\"" else { return line }
+        let prefix = line[..<line.range(of: field)!.lowerBound]
+        return "\(prefix)\(field): \"(redacted)\""
+    }.joined(separator: "\n")
 }

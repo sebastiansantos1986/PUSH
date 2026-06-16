@@ -150,46 +150,50 @@ struct InstallWorkflow {
         let progressFile = "/tmp/push-install-progress"
         let logFile      = "/tmp/push-native-install.log"
         let doneFile     = "/tmp/push-native-done.flag"
-        let wrapperPath  = "/tmp/push-native-wrapper.sh"
 
-        shell("rm -f \"\(logFile)\" \"\(doneFile)\" \"\(wrapperPath)\" 2>/dev/null; true")
+        shell("rm -f \"\(logFile)\" \"\(doneFile)\" 2>/dev/null; true")
         shell("touch \"\(logFile)\"; chmod 666 \"\(logFile)\"")
 
         // Build the install command matching super's macOS 13+ Apple Silicon pattern.
         // --user expects the Secure-Token admin account (may differ from the console
         // user when LAPS or a config-supplied admin is in use).
-        let installCmd: String
+        let arguments: [String]
+        let stdinText: String?
         if let c = creds {
             cliLog("[Install] Passing credentials for admin user: \(c.username) (native path)")
-            installCmd = "echo \"\(c.password)\" | launchctl asuser \(user.uid) sudo -u root softwareupdate --install \"\(label)\" --restart --force --no-scan --agree-to-license --user \"\(c.username)\" --stdinpass"
+            arguments = [
+                "asuser", "\(user.uid)",
+                "/usr/bin/sudo", "-u", "root",
+                "/usr/sbin/softwareupdate",
+                "--install", label,
+                "--restart", "--force", "--no-scan", "--agree-to-license",
+                "--user", c.username,
+                "--stdinpass"
+            ]
+            stdinText = c.password + "\n"
         } else {
             // Intel or password not required
-            installCmd = "launchctl asuser \(user.uid) sudo -u root softwareupdate --install \"\(label)\" --restart --force --no-scan --agree-to-license"
+            arguments = [
+                "asuser", "\(user.uid)",
+                "/usr/bin/sudo", "-u", "root",
+                "/usr/sbin/softwareupdate",
+                "--install", label,
+                "--restart", "--force", "--no-scan", "--agree-to-license"
+            ]
+            stdinText = nil
         }
 
-        let wrapper = """
-#!/bin/bash
-\(installCmd) 2>&1 | tr '\\r' '\\n' | while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    echo "$line" >> "\(logFile)"
-done
-TOOL_EXIT=${PIPESTATUS[0]}
-echo "EXIT_CODE:$TOOL_EXIT" >> "\(logFile)"
-echo "DONE" > "\(doneFile)"
-"""
-        do { try wrapper.write(toFile: wrapperPath, atomically: true, encoding: .utf8) }
-        catch { cliLog("[Install] Cannot write wrapper: \(error)"); return }
-        shell("chmod +x \"\(wrapperPath)\"")
-
-        let process = Process()
-        process.launchPath          = "/bin/zsh"
-        process.arguments           = ["-c", wrapperPath]
-        process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
-        do { try process.run() }
+        let process: Process
+        do {
+            process = try startStreamingProcess(executable: "/bin/launchctl",
+                                                arguments: arguments,
+                                                stdinText: stdinText,
+                                                logFile: logFile)
+        }
         catch { cliLog("[Install] Cannot launch native install: \(error)"); return }
 
         var processedLines = 0
-        while process.isRunning || !FileManager.default.fileExists(atPath: doneFile) {
+        while process.isRunning {
             Thread.sleep(forTimeInterval: 1.5)
             guard let raw = try? String(contentsOfFile: logFile, encoding: .utf8) else { continue }
             let lines    = raw.components(separatedBy: "\n").filter { !$0.isEmpty }
@@ -212,9 +216,9 @@ echo "DONE" > "\(doneFile)"
                         .write(toFile: progressFile, atomically: true, encoding: .utf8)
                 }
             }
-            if FileManager.default.fileExists(atPath: doneFile) { break }
         }
         process.waitUntilExit()
+        appendLine("EXIT_CODE:\(process.terminationStatus)", to: logFile)
 
         let finalLog = (try? String(contentsOfFile: logFile, encoding: .utf8)) ?? ""
         if finalLog.contains("EXIT_CODE:0") {
@@ -228,7 +232,7 @@ echo "DONE" > "\(doneFile)"
                 deleteUserPasswordFromLoginKeychain(account: c.username)
             }
         }
-        shell("rm -f \"\(wrapperPath)\" \"\(doneFile)\" 2>/dev/null; true")
+        shell("rm -f \"\(doneFile)\" 2>/dev/null; true")
         try? FileManager.default.removeItem(atPath: progressFile)
     }
 
@@ -314,25 +318,25 @@ echo "DONE" > "\(doneFile)"
             return
         }
 
-        // Secure Token preflight — startosinstall on Apple Silicon requires the
-        // authorizing user to have Secure Token. If the console user doesn't,
-        // any password (saved or freshly typed) will be rejected at install
-        // time. Catch this here so the user gets a clear actionable message
-        // instead of a cryptic "failed to authorize" error 5 minutes in.
-        if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
-            if !consoleUserHasSecureToken() {
-                cliLog("[Install] Secure Token preflight failed for console user")
-                let reason = "Your account isn't enabled for macOS upgrades. Please contact IT — they'll need to grant Secure Token to your account before this Mac can upgrade."
-                showError(reason, uiPath: uiPath, cfgPath: cfgPath)
-                return
-            }
-        }
-
         var creds: InstallCredentials? = nil
         if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
             creds = resolveInstallCredentials(uiPath: uiPath, cfgPath: cfgPath,
                                               skipInitialPrompt: skipInitialPrompt,
                                               contextLabel: "startosinstall")
+        }
+
+        // Secure Token preflight — startosinstall on Apple Silicon requires the
+        // authorizing account to have Secure Token. Check the account that will
+        // actually be passed to startosinstall, which may be LAPS/admin rather
+        // than the console user.
+        if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
+            let authUser = creds?.username ?? consoleUser()?.name ?? ""
+            if authUser.isEmpty || !userHasSecureToken(authUser) {
+                cliLog("[Install] Secure Token preflight failed for \(authUser.isEmpty ? "(unknown)" : authUser)")
+                let reason = "The account authorized for this update isn't enabled for macOS upgrades. Please contact IT — they'll need to grant Secure Token before this Mac can upgrade."
+                showError(reason, uiPath: uiPath, cfgPath: cfgPath)
+                return
+            }
         }
 
         shell("pkill -x push-ui 2>/dev/null || true")
@@ -783,15 +787,16 @@ echo "DONE" > "\(doneFile)"
         cliLog("[Install] Installer validated OK")
 
         // --forcequitapps forces open apps to quit so the install isn't stalled.
-        var cmd = "\"\(startosinstall)\" --agreetolicense --forcequitapps"
+        var installArgs = ["--agreetolicense", "--forcequitapps"]
+        var stdinText: String? = nil
         // Apple Silicon requires --user + --stdinpass together; without --user the
         // password is silently ignored and startosinstall exits without installing.
         // The account must be Secure-Token-enabled — may be a separate admin (LAPS,
         // config-file) and not the console user.
         if let c = creds {
             cliLog("[Install] Passing credentials for admin user: \(c.username)")
-            // Use double-quote herestring — single quotes break on passwords containing '
-            cmd += " --user \"\(c.username)\" --stdinpass <<<\"\(c.password)\""
+            installArgs += ["--user", c.username, "--stdinpass"]
+            stdinText = c.password + "\n"
         } else if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
             cliLog("[Install] Warning: no credentials resolved — startosinstall will likely fail on Apple Silicon")
         }
@@ -809,31 +814,26 @@ echo "DONE" > "\(doneFile)"
         // progress over 15 min and use real data when it exceeds the simulation.
         let logFile        = "/tmp/push-startosinstall.log"
         let doneFlag       = "/tmp/push-startosinstall-done.flag"
-        let wrapper        = "/tmp/push-startosinstall-wrapper.sh"
         let expectedSecs   = 15.0 * 60.0  // 15 minutes expected
         let startTime      = Date()
 
-        let script = """
-#!/bin/bash
-\(cmd) 2>&1 | tr '\r' '\n' | while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    echo "$line" >> "\(logFile)"
-done
-TOOL_EXIT=${PIPESTATUS[0]}
-echo "EXIT_CODE:$TOOL_EXIT" >> "\(logFile)"
-echo "DONE" > "\(doneFlag)"
-"""
-        shell("rm -f \"\(logFile)\" \"\(doneFlag)\" \"\(wrapper)\" 2>/dev/null; true")
-        do { try script.write(toFile: wrapper, atomically: true, encoding: .utf8) } catch {}
-        shell("chmod +x \"\(wrapper)\"")
+        shell("rm -f \"\(logFile)\" \"\(doneFlag)\" 2>/dev/null; true")
 
-        let proc = Process()
-        proc.launchPath = "/bin/zsh"
-        proc.arguments  = ["-c", wrapper]
-        try? proc.run()
+        let proc: Process
+        do {
+            proc = try startStreamingProcess(executable: startosinstall,
+                                             arguments: installArgs,
+                                             stdinText: stdinText,
+                                             logFile: logFile)
+        } catch {
+            cliLog("[Install] Cannot launch startosinstall: \(error)")
+            showError("Could not start the macOS installer. Please try again or contact IT support.",
+                      uiPath: uiPath, cfgPath: cfgPath)
+            return
+        }
 
         var lastPct = 0.0
-        while proc.isRunning || !FileManager.default.fileExists(atPath: doneFlag) {
+        while proc.isRunning {
             Thread.sleep(forTimeInterval: 3.0)
 
             // Time-based simulation: 0→92% over 15 min, eased so it feels natural
@@ -876,7 +876,8 @@ echo "DONE" > "\(doneFlag)"
                 .write(toFile: progressFile, atomically: true, encoding: .utf8)
         }
         proc.waitUntilExit()
-        shell("rm -f \"\(wrapper)\" \"\(doneFlag)\" 2>/dev/null; true")
+        appendLine("EXIT_CODE:\(proc.terminationStatus)", to: logFile)
+        shell("rm -f \"\(doneFlag)\" 2>/dev/null; true")
         try? FileManager.default.removeItem(atPath: progressFile)
 
         // Check exit code — if startosinstall failed, show error instead of freezing
@@ -968,11 +969,12 @@ echo "DONE" > "\(doneFlag)"
             let status = runUIBlocking("\"\(uiPath)\" --state passwordPrompt --config \"\(cfgPath)\"\(forcedFlag)")
 
             if status == 0 {
-                let pwdPath = "/tmp/push-password"
-                defer { try? FileManager.default.removeItem(atPath: pwdPath) }
-                if let pwd = try? String(contentsOfFile: pwdPath, encoding: .utf8) {
-                    return pwd.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let user = consoleUser()?.name else { return nil }
+                if let pwd = readUserPasswordFromLoginKeychain(account: user),
+                   validateUserPassword(account: user, password: pwd) {
+                    return pwd
                 }
+                cliLog("[Install] Password prompt succeeded but saved password was not retrievable")
             } else if skipInitialPrompt {
                 // During forced install — user tried to dismiss, show again
                 cliLog("[Install] Password prompt dismissed during forced install — retrying (attempt \(attempts))")
@@ -1107,5 +1109,60 @@ echo "DONE" > "\(doneFlag)"
         cliLog("[Install] Error: \(message)")
         shell("pkill -x push-ui 2>/dev/null || true"); Thread.sleep(forTimeInterval: 0.3)
         launchUIAsUser("\"\(uiPath)\" --state error --config \"\(cfgPath)\" --error \"\(message)\"")
+    }
+
+    private func startStreamingProcess(executable: String,
+                                       arguments: [String],
+                                       stdinText: String?,
+                                       logFile: String) throws -> Process {
+        FileManager.default.createFile(atPath: logFile, contents: nil)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            appendLine(chunk.replacingOccurrences(of: "\r", with: "\n"), to: logFile)
+        }
+
+        let inputPipe: Pipe?
+        if stdinText != nil {
+            let pipe = Pipe()
+            process.standardInput = pipe
+            inputPipe = pipe
+        } else {
+            inputPipe = nil
+        }
+
+        try process.run()
+
+        if let stdinText, let inputPipe {
+            inputPipe.fileHandleForWriting.write(Data(stdinText.utf8))
+            try? inputPipe.fileHandleForWriting.close()
+        }
+
+        return process
+    }
+}
+
+private func appendLine(_ text: String, to path: String) {
+    guard let data = text.hasSuffix("\n")
+            ? text.data(using: .utf8)
+            : "\(text)\n".data(using: .utf8)
+    else { return }
+
+    if FileManager.default.fileExists(atPath: path),
+       let handle = FileHandle(forWritingAtPath: path) {
+        handle.seekToEndOfFile()
+        handle.write(data)
+        try? handle.close()
+    } else {
+        FileManager.default.createFile(atPath: path, contents: data)
     }
 }

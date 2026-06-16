@@ -125,6 +125,7 @@ struct AutoCheckCommand {
                         cliSuccess("Jamf inventory updated")
                     }
                 }
+                runUptimeCheckIfAllowed(config: config)
                 exit(0)
             }
         }
@@ -162,14 +163,7 @@ struct AutoCheckCommand {
             } else {
                 cliSuccess("No updates found. \(current) is current.")
                 cliLog("[AutoCheck] No updates found")
-                // Mac is up to date — but uptime check still needs to run.
-                // This is precisely the case where a reboot reminder is most
-                // useful: nothing else will trigger a restart soon. Run
-                // uptime check directly here since runNudgeSchedule is gated
-                // on having an update target.
-                if !isDryRun, config.uptime.enabled {
-                    performUptimeCheck(config: config)
-                }
+                runUptimeCheckIfAllowed(config: config)
             }
             exit(0)
         }
@@ -320,12 +314,7 @@ struct AutoCheckCommand {
 
         cliLog("[AutoCheck] Checking schedule — nextNudge: \(state.nextNudgeDate), nextToast: \(state.nextToastDate)")
 
-        // Uptime check — runs HERE (not earlier in the flow) because we need
-        // the post-detection target version to know whether to skip. If an
-        // OS update is pending, the uptime evaluator will return .quiet.
-        if !isDryRun {
-            performUptimeCheck(config: config)
-        }
+        runUptimeCheckIfAllowed(config: config)
 
         // ── Deadline enforcement — always checked first ───────────────────────────
         if config.isPastDeadline {
@@ -893,15 +882,17 @@ extension AutoCheckCommand {
         } else {
             cliLog("[AutoCheck] User canceled password prompt — proceeding without saved password")
         }
-        // Clean up the temp file the password prompt writes to /tmp/push-password
-        // so a stale value doesn't leak into a later install run
-        try? FileManager.default.removeItem(atPath: "/tmp/push-password")
     }
 
     /// Run the uptime monitoring check. May launch a popup; never blocks the
     /// rest of auto-check. The popup runs in the user's session via launchctl
     /// asuser so we don't gate on its result here — user's response is handled
     /// by a small follow-up exit-code switch below.
+    private func runUptimeCheckIfAllowed(config: CLIConfig) {
+        guard !isDryRun else { return }
+        performUptimeCheck(config: (try? loadConfig()) ?? config)
+    }
+
     private func performUptimeCheck(config: CLIConfig) {
         let decision = UptimeCheck(config: config).evaluate()
         switch decision {

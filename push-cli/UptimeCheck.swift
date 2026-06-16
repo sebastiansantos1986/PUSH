@@ -127,6 +127,10 @@ struct UptimeCheck {
     // MARK: - Internals
 
     private func currentUptimeSeconds() -> Double {
+        return Self.currentUptimeSeconds()
+    }
+
+    static func currentUptimeSeconds() -> Double {
         let (out, _) = shell("/usr/sbin/sysctl -n kern.boottime 2>/dev/null")
         // Output looks like: { sec = 1717168919, usec = 235814 } Mon May 31 ...
         let scanner = Scanner(string: out)
@@ -183,5 +187,214 @@ struct UptimeCheck {
         }
         let (mic, _) = shell("ioreg -r -c IOAudioEngine -d 4 2>/dev/null | grep -iE 'input.*running|capturing'")
         return !mic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+// MARK: - Reboot CLI
+
+struct RebootCommand {
+    let args: [String]
+
+    private var subcommand: String { args.first ?? "status" }
+    private var rest: [String] { args.isEmpty ? [] : Array(args.dropFirst()) }
+
+    func run() {
+        switch subcommand {
+        case "status": status()
+        case "check": check()
+        case "nudge": showNudge()
+        case "force": showForce()
+        case "defer": recordDeferral()
+        case "reset": resetState()
+        case "now": restartNow()
+        case "help", "--help", "-h": printHelp()
+        default:
+            cliError("Unknown reboot subcommand '\(subcommand)'")
+            printHelp()
+            exit(1)
+        }
+    }
+
+    private func printHelp() {
+        cliPrint("""
+Usage: push-cli reboot <status|check|nudge|force|defer|reset|now>
+
+  reboot status                 Show uptime/reboot policy and current state
+  reboot check                  Evaluate policy and print quiet/warning/force
+  reboot nudge                  Show restart reminder popup now
+  reboot force                  Show forced restart countdown popup now
+    --timer 300                 Override countdown seconds for this run
+  reboot defer                  Record one reboot deferral
+  reboot reset                  Clear reboot deferrals and prompt schedule
+  reboot now --confirm          Restart this Mac now
+
+Config can be controlled with:
+  sudo push-cli config set uptime.enabled true
+  sudo push-cli config set uptime.warningThresholdDays 14
+  sudo push-cli config set uptime.forceThresholdDays 20
+  sudo push-cli config set uptime.maxDeferrals 3
+  sudo push-cli config set uptime.promptIntervalDays 1
+  sudo push-cli config set uptime.forceTimerSeconds 600
+""")
+    }
+
+    private func status() {
+        guard let config = try? loadConfig() else {
+            cliError("Cannot load config"); exit(1)
+        }
+        let uptimeSeconds = UptimeCheck.currentUptimeSeconds()
+        let uptimeDays = Int(uptimeSeconds / 86400)
+        let state = loadState()
+        let remaining = max(0, config.uptime.maxDeferrals - state.uptimeDeferralCount)
+
+        cliSection("🔄 Reboot Policy")
+        cliDivider()
+        cliInfo("Enabled:", config.uptime.enabled ? "Yes" : "No")
+        cliInfo("Current uptime:", "\(uptimeDays) days")
+        cliInfo("Warning threshold:", "\(config.uptime.warningThresholdDays) days")
+        cliInfo("Force threshold:", "\(config.uptime.forceThresholdDays) days")
+        cliInfo("Deferrals:", "\(state.uptimeDeferralCount) / \(config.uptime.maxDeferrals)")
+        cliInfo("Remaining deferrals:", "\(remaining)")
+        cliInfo("Next prompt:", formatDateForCLI(state.uptimeNextPromptDate))
+        cliInfo("Force timer:", "\(config.uptime.forceTimerSeconds) seconds")
+        cliInfo("Skip during meeting:", config.uptime.skipDuringMeeting ? "Yes" : "No")
+        cliInfo("Last boot stamp:", state.uptimeLastBootTimestamp == 0 ? "(not recorded)" : "\(Int(state.uptimeLastBootTimestamp))")
+    }
+
+    private func check() {
+        guard let config = try? loadConfig() else {
+            cliError("Cannot load config"); exit(2)
+        }
+
+        switch UptimeCheck(config: config).evaluate() {
+        case .quiet:
+            cliPrint("quiet")
+            exit(0)
+        case .showWarning(let days, let remaining):
+            cliPrint("warning: uptime=\(days)d, deferralsRemaining=\(remaining)")
+            exit(1)
+        case .showForce(let days, let timer):
+            cliPrint("force: uptime=\(days)d, timer=\(timer)s")
+            exit(2)
+        }
+    }
+
+    private func showNudge() {
+        guard let config = try? loadConfig() else {
+            cliError("Cannot load config"); exit(1)
+        }
+        let days = overrideDays() ?? Int(UptimeCheck.currentUptimeSeconds() / 86400)
+        let remaining = overrideRemaining(config: config)
+        let status = runRebootPopup(state: "rebootNudge",
+                                    args: ["--uptime-days", "\(days)",
+                                           "--deferrals-remaining", "\(remaining)"])
+
+        switch Int(status) {
+        case 0:
+            cliSuccess("User chose Restart Now")
+            if rest.contains("--restart") {
+                UptimeCheck.performRestart()
+            } else {
+                cliPrint("Restart not triggered. Add --restart if you want this command to restart after user approval.")
+            }
+        case 1:
+            UptimeCheck.recordDeferral(config: config)
+            cliSuccess("Restart deferred")
+        default:
+            cliPrint("Popup exited with code \(status)")
+        }
+    }
+
+    private func showForce() {
+        guard let config = try? loadConfig() else {
+            cliError("Cannot load config"); exit(1)
+        }
+        let days = overrideDays() ?? Int(UptimeCheck.currentUptimeSeconds() / 86400)
+        let timer = Int(argValue("--timer", in: rest) ?? "") ?? config.uptime.forceTimerSeconds
+        let status = runRebootPopup(state: "rebootForce",
+                                    args: ["--uptime-days", "\(days)",
+                                           "--timer-seconds", "\(timer)"])
+        cliLog("[Reboot] Force popup exited with code \(status)")
+        if rest.contains("--restart") {
+            UptimeCheck.performRestart()
+        } else {
+            cliSuccess("Force popup completed")
+            cliPrint("Restart not triggered. Add --restart if you want this command to restart after the countdown.")
+        }
+    }
+
+    private func recordDeferral() {
+        guard let config = try? loadConfig() else {
+            cliError("Cannot load config"); exit(1)
+        }
+        UptimeCheck.recordDeferral(config: config)
+        cliSuccess("Recorded reboot deferral")
+    }
+
+    private func resetState() {
+        guard getuid() == 0 else {
+            cliError("reboot reset requires root. Run: sudo push-cli reboot reset"); exit(1)
+        }
+        var state = loadState()
+        state.uptimeDeferralCount = 0
+        state.uptimeNextPromptDate = .distantPast
+        state.uptimeLastBootTimestamp = 0
+        do {
+            try saveState(state)
+            cliSuccess("Reboot state reset")
+            cliLog("[Reboot] Uptime reboot state reset")
+        } catch {
+            cliError("Failed to save state: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
+    private func restartNow() {
+        guard getuid() == 0 else {
+            cliError("reboot now requires root. Run: sudo push-cli reboot now --confirm"); exit(1)
+        }
+        guard rest.contains("--confirm") else {
+            cliError("Refusing to restart without confirmation. Run: sudo push-cli reboot now --confirm")
+            exit(1)
+        }
+        UptimeCheck.performRestart()
+    }
+
+    private func runRebootPopup(state: String, args popupArgs: [String]) -> Int32 {
+        guard let user = consoleUser() else {
+            cliError("No console user is logged in; cannot show reboot popup.")
+            exit(1)
+        }
+        guard let cfgPath = resolvedConfigPath else {
+            cliError("No config found at \(managedBase)/config.yaml")
+            exit(1)
+        }
+        let uiPath = resolveUIBinary()
+        guard FileManager.default.fileExists(atPath: uiPath) else {
+            cliError("push-ui not found at \(uiPath)")
+            exit(1)
+        }
+
+        shell("pkill -x push-ui 2>/dev/null || true")
+        Thread.sleep(forTimeInterval: 0.3)
+        let extra = popupArgs.joined(separator: " ")
+        let cmd = "launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \"\(uiPath)\" --state \(state) --config \"\(cfgPath)\" \(extra)"
+        return runUIBlocking(cmd)
+    }
+
+    private func overrideDays() -> Int? {
+        Int(argValue("--days", in: rest) ?? "")
+    }
+
+    private func overrideRemaining(config: CLIConfig) -> Int {
+        if let val = Int(argValue("--remaining", in: rest) ?? "") { return val }
+        let state = loadState()
+        return max(0, config.uptime.maxDeferrals - state.uptimeDeferralCount)
+    }
+
+    private func formatDateForCLI(_ date: Date) -> String {
+        if date == .distantPast { return "Now (due)" }
+        if date == .distantFuture { return "Never" }
+        return ISO8601DateFormatter().string(from: date)
     }
 }

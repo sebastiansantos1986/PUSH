@@ -14,8 +14,9 @@ let kPushUserPwService = "com.push.userpassword"
 ///
 /// Failure here is non-fatal — the install can still proceed with the password
 /// in /tmp. We just won't have a saved copy for next time.
-func saveUserPasswordToLoginKeychain(account: String, password: String) {
-    guard !account.isEmpty, !password.isEmpty else { return }
+@discardableResult
+func saveUserPasswordToLoginKeychain(account: String, password: String) -> Bool {
+    guard !account.isEmpty, !password.isEmpty else { return false }
 
     // Delete any existing entry first — `security add` fails (errSecDuplicateItem)
     // if one already exists. Suppress output: this fails harmlessly if no entry.
@@ -40,7 +41,7 @@ func saveUserPasswordToLoginKeychain(account: String, password: String) {
       -T /usr/bin/security \
       2>/dev/null
     """
-    _ = runShell(addCmd)
+    return runShell(addCmd) == 0
 }
 
 /// Quick local helper — Process-based shell exec.
