@@ -1,127 +1,63 @@
-# PUSH — Smart Group Reference
+# PUSH - Jamf Smart Groups
 
-Six Smart Computer Groups built around the `OS Update Compliance` Extension Attribute. Each group answers a specific operational question.
+`setup-jamf.sh` creates the PUSH Extension Attributes and Smart Computer Groups
+below. The script is dry-run-only unless `--apply` is supplied, skips objects
+that already exist, and asks before every creation unless `--yes` is used.
 
-## Quick reference
+## Extension Attributes
 
-| Group                          | Answers                                                | Use when                                                            |
-|--------------------------------|--------------------------------------------------------|---------------------------------------------------------------------|
-| PUSH: Compliant                | "How many Macs are on the target version?"            | Daily compliance dashboards                                         |
-| PUSH: Non-Compliant - Active   | "Who's still working through the nudge cycle?"        | Pilot monitoring, deferral pattern analysis                         |
-| PUSH: Past Deadline            | "Who's past their deadline and needs intervention?"   | Triage list — these Macs should be installing now or escalated      |
-| PUSH: Install In Progress      | "Who's installing right now?"                         | Spot installs that may have stalled mid-flight                      |
-| PUSH: Not Reporting            | "Who's missing PUSH or hasn't checked in?"            | Deployment progress, find Macs needing PUSH installed               |
-| PUSH: Reboot Pending           | "Who needs to restart their Mac?"                     | Nudge users with stale uptime even though OS is current             |
+| Extension Attribute | Type | Purpose |
+|---|---|---|
+| PUSH — OS Update Compliance EA | String | Compliant, update required, deadline, install, or missing state |
+| PUSH — Days Until Deadline EA | Integer | Days to the configured deadline; `-1` when no deadline is configured |
+| PUSH — Deferral Count EA | Integer | Update deferrals already used |
+| PUSH — Deferral Reasons EA | String | User-selected reasons, or `None` |
+| PUSH — Deferrals Remaining EA | Integer | Remaining deferrals based on the Mac's active configuration |
+| PUSH — Health EA | String | Installed version, LaunchDaemon state, and last auto-check activity |
+| PUSH — Reboot Status EA | String | Healthy, warning, or force state from the uptime policy |
 
-## Group definitions
+No EA reports a password, API secret, recovery key, or other credential.
 
-### PUSH: Compliant
+## Smart Groups
 
-**EA value matches:** `like "Compliant"`
+| Smart Group | Key criteria | Operational use |
+|---|---|---|
+| PUSH: Compliant | Compliance is `Compliant` | Fleet compliance dashboard |
+| PUSH: Non-Compliant - Active | Compliance contains `Non-Compliant` | Macs working through the update cycle |
+| PUSH: Past Deadline | Compliance contains `Past Deadline` | Immediate update investigation |
+| PUSH: Install In Progress | Compliance contains `Install Started` | Watch installs and identify stalls |
+| PUSH: Not Installed | Compliance says `PUSH not installed` or Health says `Not Installed` | Deployment coverage |
+| PUSH: Not Configured | Compliance is `Not configured` | Macs without an update target |
+| PUSH: Deadline Due or Past | Non-compliant and days remaining is below 1 | Deadline enforcement queue |
+| PUSH: Deferrals Used | Deferral count is above 0 | Adoption and deferral analysis |
+| PUSH: Deferrals Exhausted | Non-compliant and remaining deferrals is 0 | Users requiring enforcement |
+| PUSH: Health Attention | Health contains `Attention` | Missing daemon, config, or stale auto-check |
+| PUSH: Reboot Warning | Reboot status contains `Warning` | Friendly restart-reminder population |
+| PUSH: Reboot Force | Reboot status contains `Force` | Forced restart population |
 
-**Includes Macs that are:**
-- On the target macOS version, OR
-- Have no target set yet (fresh install — PUSH hasn't decided non-compliance)
+## Inventory timing
 
-This is the goal state. Most Macs should be here most of the time.
+Extension Attributes run during Jamf inventory. Smart Group membership therefore
+reflects the latest inventory submission, not a live query of the Mac. After
+setup, run this on a pilot Mac:
 
-**Sample EA values:**
-- `Compliant | 26.4.1 | Target: 26.4.1`
-- `Compliant | 26.4.1 | Target: (none)`
+```bash
+sudo jamf recon
+```
 
-### PUSH: Non-Compliant - Active
+Review the Mac's inventory record before using a new group for policy scope.
+Start with reports or exclusions, validate membership, and only then attach an
+enforcement policy.
 
-**EA value matches:** `like "Non-Compliant"` AND `not like "Past-Deadline"`
+## Custom groups using the EAs
 
-**Includes Macs that:**
-- Are behind the target version
-- Are still within their deadline window
-- Have used some or all of their deferrals but the deadline hasn't hit
+The seven EAs are intentionally reusable. Examples administrators can add in
+Jamf without another script:
 
-This is the "soft pressure" group — these Macs are seeing nudges but the user is still in control. Worth watching to see how deferrals trend before deadline.
+- Repeated deferrers: `PUSH — Deferral Count EA` more than `2`
+- Meeting-related deferrals: `PUSH — Deferral Reasons EA` like `Meeting`
+- Stale automation: `PUSH — Health EA` like `Auto-check stale`
+- Specific PUSH release: `PUSH — Health EA` like `Version 1.1.0`
 
-**Sample EA value:**
-- `Non-Compliant | 15.0 → 26.4.1 | Deferrals: 3/7`
-
-### PUSH: Past Deadline
-
-**EA value matches:** `like "Past-Deadline"`
-
-**Includes Macs that:**
-- Are behind the target version
-- Have passed their deadline date
-- Should be auto-installing on next auto-check (or already are, in which case they'll move to Install In Progress)
-
-This is the most actionable group. If a Mac sits here for more than a day or two, something's blocking auto-install — investigate.
-
-Possible blockers:
-- User in active screen share / meeting (intentional skip)
-- No console user logged in (waiting for login)
-- Saved password invalid
-- Disk space / power preflight failing
-- startosinstall keeps failing for some reason
-
-**Sample EA value:**
-- `Past-Deadline | 15.0 → 26.4.1 | Install-Pending`
-
-### PUSH: Install In Progress
-
-**EA value matches:** `like "Install-Started"`
-
-**Includes Macs where:**
-- `installStarted: true` and `installCompleted: false` in state.json
-- Either downloading the installer or running startosinstall
-
-For a healthy install, a Mac is in this group for 30-60 minutes (download + install + reboot). If a Mac is here longer than ~90 minutes, the install probably stalled.
-
-**Sample EA value:**
-- `Install-Started | 15.0 → 26.4.1`
-
-### PUSH: Not Reporting
-
-**EA value matches:** `is "Not Installed"` OR `is (blank)`
-
-**Includes Macs that:**
-- Don't have PUSH installed (`Not Installed` returned by the EA script)
-- Or haven't run inventory recently and Jamf has no value
-
-Use this to track deployment progress when rolling PUSH to new groups.
-
-### PUSH: Reboot Pending
-
-**EA value matches:** `like "Reboot-Pending"`
-
-**Includes Macs that:**
-- Are on the target version (so OS-compliant)
-- Have a long enough uptime to trigger PUSH's reboot reminders
-
-This catches the "running 30 days without restart" case. Different problem than OS compliance — these Macs need a restart for security reasons, not version updates.
-
-**Note:** Reboot reminders are a separate feature controlled by `uptime.enabled` in PUSH's config. If you haven't enabled uptime monitoring fleet-wide, this group will be empty.
-
-**Sample EA value:**
-- `Reboot-Pending | Uptime: 21d`
-
-## Operational dashboards
-
-A useful Jamf dashboard would show counts for:
-- PUSH: Compliant (target: 100% of fleet eventually)
-- PUSH: Non-Compliant - Active (target: trends toward 0 as deadline approaches)
-- PUSH: Past Deadline (target: 0 — anything here is an issue)
-- PUSH: Install In Progress (snapshot in time — watching for stalls)
-- PUSH: Not Reporting (target: 0 once deployment finishes)
-
-Jamf Pro doesn't have a built-in "show counts as a widget" — but you can:
-- Use Smart Group membership counts (visible on the group's page)
-- Build a Splunk/Datadog dashboard that polls Jamf API for membership counts
-- Generate a weekly report email via Jamf Self Service or a separate cron
-
-## Adjusting criteria
-
-If you want different filtering:
-
-- **Want only Macs past deadline by 24h+?** Add an "Inventory General Information" criterion for Last Inventory Update.
-- **Want to exclude opt-out users?** Add a criterion: "Username" not in [list of names].
-- **Want to scope to specific OS versions?** Add a criterion on Operating System version.
-
-Smart Groups are filters on top of inventory — they reflect the snapshot from each Mac's last recon, not real-time state.
+Do not build a group using only `Days Until Deadline = -1`; that value means no
+deadline is configured. Combine deadline criteria with a non-compliant state.

@@ -287,8 +287,8 @@ cd jamf-setup
 
 The script:
 - Authenticates with Jamf via OAuth
-- Creates the OS Update Compliance Extension Attribute (if missing)
-- Creates 5 Smart Computer Groups for filtering compliance state
+- Creates all 7 PUSH Extension Attributes (if missing)
+- Creates 12 Smart Computer Groups for compliance, deadlines, deferrals, health, and reboot state
 - Asks per-object confirmation before any change
 - Verifies each object after creation
 
@@ -326,7 +326,14 @@ The setup creates these by default — adjust criteria in Jamf web UI as needed:
 | PUSH: Non-Compliant - Active | EA contains "Non-Compliant" AND NOT "Past Deadline" |
 | PUSH: Past Deadline | EA contains "Past Deadline" |
 | PUSH: Install In Progress | EA contains "Install Started" |
-| PUSH: Not Reporting | EA is "Not Installed" or blank |
+| PUSH: Not Installed | PUSH is absent from the Mac |
+| PUSH: Not Configured | PUSH has no update target |
+| PUSH: Deadline Due or Past | Non-compliant with fewer than 1 day remaining |
+| PUSH: Deferrals Used | At least one update deferral was used |
+| PUSH: Deferrals Exhausted | Non-compliant with no deferrals remaining |
+| PUSH: Health Attention | Daemon, config, or auto-check requires attention |
+| PUSH: Reboot Warning | Uptime restart warning phase |
+| PUSH: Reboot Force | Uptime forced-restart phase |
 
 ---
 
