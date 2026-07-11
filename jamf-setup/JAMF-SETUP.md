@@ -74,7 +74,7 @@ PUSH — Days Until Deadline EA: -1
 PUSH — Deferral Count EA: 0
 PUSH — Deferral Reasons EA: None
 PUSH — Deferrals Remaining EA: 5
-PUSH — Health EA: Healthy | Version 1.1.0 | Daemon loaded | Last activity 1h
+PUSH — Health EA: Healthy | Version 1.1.7 | Daemon loaded | Last activity 1h
 PUSH — Reboot Status EA: Healthy | Uptime 3d
 ```
 
