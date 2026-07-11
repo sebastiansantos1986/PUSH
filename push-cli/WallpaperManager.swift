@@ -45,6 +45,28 @@ struct WallpaperManager {
         return success
     }
 
+    /// When the Mac becomes compliant, only replace the wallpaper if PUSH's
+    /// non-compliant image is still the active desktop picture. If the user
+    /// changed their wallpaper, preserve it.
+    @discardableResult
+    func applyCompliantIfReplacingNonCompliant() -> Bool {
+        guard config.compliance.wallpaperEnabled else { return false }
+
+        guard currentMacUsesNonCompliantWallpaper() else {
+            cliLog("[Wallpaper] Compliant; current wallpaper is not PUSH non-compliant wallpaper — preserving user wallpaper")
+            return false
+        }
+
+        cliLog("[Wallpaper] Replacing PUSH non-compliant wallpaper with compliant wallpaper")
+        let success = applyForce(.compliant)
+        if success {
+            var s = loadState()
+            s.lastAppliedWallpaperState = WallpaperState.compliant.rawValue
+            try? saveState(s)
+        }
+        return success
+    }
+
     /// Apply the wallpaper for the given state unconditionally. Used by the
     /// CLI subcommand and the install-completion hook where we want to force
     /// the wallpaper regardless of last-applied state.
@@ -128,6 +150,43 @@ struct WallpaperManager {
             cliLog("[Wallpaper] desktoppr install failed (exit \(st)): \(out.prefix(500))")
             return false
         }
+    }
+
+    private func currentMacUsesNonCompliantWallpaper() -> Bool {
+        let nonCompliant = standardize(config.compliance.nonCompliantWallpaper)
+        return currentWallpaperPaths().contains { standardize($0) == nonCompliant }
+    }
+
+    private func currentWallpaperPaths() -> [String] {
+        guard let user = consoleUser() else {
+            cliLog("[Wallpaper] No console user — cannot inspect current wallpaper")
+            return []
+        }
+
+        if !FileManager.default.isExecutableFile(atPath: config.compliance.desktopprPath) {
+            cliLog("[Wallpaper] desktoppr not found at \(config.compliance.desktopprPath) — attempting lazy install")
+            if !installDesktopprIfNeeded() {
+                cliLog("[Wallpaper] ERROR: desktoppr install failed — cannot inspect current wallpaper")
+                return []
+            }
+        }
+
+        let dp = config.compliance.desktopprPath
+        let cmd = "launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \"\(dp)\" 2>/dev/null"
+        let (out, status) = shell(cmd)
+        guard status == 0 else {
+            cliLog("[Wallpaper] Could not inspect current wallpaper (desktoppr exit \(status))")
+            return []
+        }
+
+        return out
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func standardize(_ path: String) -> String {
+        (NSString(string: path).expandingTildeInPath as NSString).standardizingPath
     }
 
     /// Convenience helper — reads current macOS version, compares to target,

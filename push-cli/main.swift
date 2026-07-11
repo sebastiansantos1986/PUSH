@@ -3,7 +3,7 @@
 
 import Foundation
 
-let cliVersion = "1.1.0"
+let cliVersion = "1.1.7"
 
 func printHelp() {
     print("""

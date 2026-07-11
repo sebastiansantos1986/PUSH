@@ -91,12 +91,18 @@ declare -a EA_NAMES=(
     "PUSH — Days Until Deadline EA"
     "PUSH — Deferral Count EA"
     "PUSH — Deferral Reasons EA"
+    "PUSH — Deferrals Remaining EA"
+    "PUSH — Health EA"
+    "PUSH — Reboot Status EA"
 )
 declare -a EA_FILES=(
     "ea-os-update-compliance.sh"
     "ea-days-until-deadline.sh"
     "ea-deferral-count.sh"
     "ea-deferral-reasons.sh"
+    "ea-deferrals-remaining.sh"
+    "ea-push-health.sh"
+    "ea-reboot-status.sh"
 )
 
 # ── Banner ────────────────────────────────────────────────────────────────────

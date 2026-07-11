@@ -7,6 +7,7 @@ import AppKit
 // MARK: - Argument parsing
 
 let args = CommandLine.arguments
+let uiTamperEventPath = "/tmp/push-ui-tamper-events.log"
 
 func argVal(_ flag: String) -> String? {
     guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
@@ -79,6 +80,21 @@ if let u = argVal("--uptime-days")          { context.uptimeDays         = Int(u
 if let r = argVal("--deferrals-remaining")  { context.uptimeDeferralsRemaining = Int(r) ?? 0 }
 if let t = argVal("--timer-seconds")        { context.uptimeTimerSeconds = Int(t) ?? 600 }
 
+func recordTamperAttempt(_ message: String) {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    let line = "[\(ts)] [UI-TAMPER] state=\(context.state.rawValue) forced=\(context.forcedInstall) \(message)\n"
+    guard let data = line.data(using: .utf8) else { return }
+
+    if FileManager.default.fileExists(atPath: uiTamperEventPath),
+       let handle = FileHandle(forWritingAtPath: uiTamperEventPath) {
+        handle.seekToEndOfFile()
+        handle.write(data)
+        handle.closeFile()
+    } else {
+        try? data.write(to: URL(fileURLWithPath: uiTamperEventPath), options: .atomic)
+    }
+}
+
 // MARK: - App
 
 struct PushUIApp: App {
@@ -138,6 +154,7 @@ class PushAppDelegate: NSObject, NSApplicationDelegate {
             || context.state == .preflightPower
             || context.state == .rebooting
         if isForcedInstall {
+            recordTamperAttempt("termination blocked")
             NSLog("[PUSH-UI] Termination blocked — forced install in progress")
             return .terminateCancel
         }
@@ -322,15 +339,19 @@ private struct WindowConfigurator: NSViewRepresentable {
             if isForcedInstall && event.modifierFlags.contains(.command) {
                 switch event.keyCode {
                 case 12: // Q — quit
+                    recordTamperAttempt("Cmd+Q blocked")
                     NSLog("[PUSH-UI] Cmd+Q blocked during forced install")
                     return nil
                 case 13: // W — close window
+                    recordTamperAttempt("Cmd+W blocked")
                     NSLog("[PUSH-UI] Cmd+W blocked during forced install")
                     return nil
                 case 4:  // H — hide
+                    recordTamperAttempt("Cmd+H blocked")
                     NSLog("[PUSH-UI] Cmd+H blocked during forced install")
                     return nil
                 case 34: // M — minimize
+                    recordTamperAttempt("Cmd+M blocked")
                     NSLog("[PUSH-UI] Cmd+M blocked during forced install")
                     return nil
                 default:
@@ -339,6 +360,10 @@ private struct WindowConfigurator: NSViewRepresentable {
             }
 
             // Escape only exits when NOT in a forced/active install state
+            if event.keyCode == 53 && isForcedInstall {
+                recordTamperAttempt("Escape blocked")
+                return nil
+            }
             if event.keyCode == 53 && !isForcedInstall {
                 Foundation.exit(PushExitCode.dismiss.rawValue)
             }

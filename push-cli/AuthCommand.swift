@@ -13,9 +13,9 @@ import Foundation
 
 // MARK: - Keychain constants
 
-private let kService  = "com.push.autoupdate"
-private let kAccount  = "push_auth_local_password"
-private let kKeychain = "/Library/Keychains/System.keychain"
+let kPushAuthService  = "com.push.autoupdate"
+let kPushAuthAccount  = "push_auth_local_password"
+let kPushAuthKeychain = "/Library/Keychains/System.keychain"
 
 struct AuthCommand {
     let args: [String]
@@ -42,9 +42,17 @@ struct AuthShowUserPasswordCommand {
     func run() {
         cliSection("👤 User Saved Password")
         cliDivider()
+        if let cfg = try? loadConfig(),
+           !cfg.auth.localAccount.isEmpty,
+           let pwd = keychainPassword(),
+           validateUserPassword(account: cfg.auth.localAccount, password: pwd) {
+            cliInfo("Account:", cfg.auth.localAccount)
+            cliInfo("Status:", "✅ Saved and valid in System Keychain")
+            return
+        }
         guard let user = consoleUser()?.name, !user.isEmpty else {
             cliInfo("Console user:", "(none — no logged-in user)")
-            cliInfo("Status:",       "❌ Cannot read login keychain without a console user")
+            cliInfo("Status:",       "❌ No System Keychain password found")
             return
         }
         cliInfo("Console user:", user)
@@ -77,6 +85,7 @@ struct AuthClearUserPasswordCommand {
             cliError("No console user — nothing to clear."); exit(1)
         }
         deleteUserPasswordFromLoginKeychain(account: user)
+        shell("security delete-generic-password -s '\(kPushAuthService)' -a '\(kPushAuthAccount)' '\(kPushAuthKeychain)' 2>/dev/null || true")
         cliSuccess("Cleared saved password for \(user)")
         cliLog("[Auth] Cleared saved user password for \(user)")
     }
@@ -120,20 +129,7 @@ struct AuthSetPasswordCommand {
         }
 
         // Delete any existing entry first
-        shell("security delete-generic-password -s '\(kService)' -a '\(kAccount)' '\(kKeychain)' 2>/dev/null || true")
-
-        // Store via security CLI — works on all macOS versions, no deprecated APIs
-        let (_, addStatus) = shell("""
-            security add-generic-password \
-              -s '\(kService)' \
-              -a '\(kAccount)' \
-              -l 'PUSH — Local Auth Password (\(account))' \
-              -j 'Managed by push-cli. Account: \(account)' \
-              -w '\(password)' \
-              '\(kKeychain)'
-            """)
-
-        if addStatus == 0 {
+        if storeSystemKeychainPassword(account: account, password: password) {
             cliSuccess("Password stored in System Keychain for account: \(account)")
             cliLog("[Auth] Stored credentials for account '\(account)' in System Keychain")
 
@@ -151,7 +147,7 @@ struct AuthSetPasswordCommand {
             cliPrint("To verify: sudo push-cli auth show")
             cliPrint("To remove: sudo push-cli auth clear")
         } else {
-            cliError("Failed to store password in System Keychain (exit \(addStatus))")
+            cliError("Failed to store password in System Keychain")
             exit(1)
         }
     }
@@ -191,7 +187,7 @@ struct AuthClearCommand {
             cliError("auth clear requires root. Run: sudo push-cli auth clear"); exit(1)
         }
 
-        let (_, status) = shell("security delete-generic-password -s '\(kService)' -a '\(kAccount)' '\(kKeychain)' 2>/dev/null")
+        let (_, status) = shell("security delete-generic-password -s '\(kPushAuthService)' -a '\(kPushAuthAccount)' '\(kPushAuthKeychain)' 2>/dev/null")
         if status == 0 || status == 44 { // 44 = item not found
             cliSuccess("Keychain credentials cleared")
             cliLog("[Auth] Keychain credentials removed")
@@ -212,15 +208,50 @@ struct AuthClearCommand {
 
 /// Check if a password is stored in the System Keychain.
 func keychainPasswordExists() -> Bool {
-    let (_, status) = shell("security find-generic-password -s '\(kService)' -a '\(kAccount)' '\(kKeychain)' 2>/dev/null")
+    let (_, status) = shell("security find-generic-password -s '\(kPushAuthService)' -a '\(kPushAuthAccount)' '\(kPushAuthKeychain)' 2>/dev/null")
     return status == 0
 }
 
 /// Retrieve the stored password from the System Keychain.
 /// Returns nil if not found — caller falls back to interactive prompt.
 func keychainPassword() -> String? {
-    let (out, status) = shell("security find-generic-password -s '\(kService)' -a '\(kAccount)' -w '\(kKeychain)' 2>/dev/null")
+    let (out, status) = shell("security find-generic-password -s '\(kPushAuthService)' -a '\(kPushAuthAccount)' -w '\(kPushAuthKeychain)' 2>/dev/null")
     guard status == 0 else { return nil }
     let pwd = out.trimmingCharacters(in: .whitespacesAndNewlines)
     return pwd.isEmpty ? nil : pwd
+}
+
+/// Store a validated local-account password in the System Keychain and record
+/// its account name in config.yaml. Used by both manual auth setup and the
+/// one-time GUI password capture flow.
+@discardableResult
+func storeSystemKeychainPassword(account: String, password: String) -> Bool {
+    guard !account.isEmpty, !password.isEmpty else { return false }
+
+    shell("security delete-generic-password -s '\(kPushAuthService)' -a '\(kPushAuthAccount)' '\(kPushAuthKeychain)' 2>/dev/null || true")
+
+    let (_, addStatus) = shell("""
+        security add-generic-password \
+          -s '\(kPushAuthService)' \
+          -a '\(kPushAuthAccount)' \
+          -l 'PUSH — Local Auth Password (\(shellQuote(account)))' \
+          -j 'Managed by push-cli. Account: \(shellQuote(account))' \
+          -w '\(shellQuote(password))' \
+          '\(kPushAuthKeychain)'
+        """)
+
+    guard addStatus == 0 else { return false }
+
+    if var cfg = try? loadConfig(), let cfgPath = resolvedConfigPath {
+        cfg.auth.localAccount = account
+        cfg.auth.localPassword = ""
+        if let data = cfg.toYAML().data(using: .utf8) {
+            try? data.write(to: URL(fileURLWithPath: cfgPath), options: .atomic)
+        }
+    }
+    return true
+}
+
+func shellQuote(_ value: String) -> String {
+    value.replacingOccurrences(of: "'", with: "'\\''")
 }

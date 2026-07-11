@@ -260,10 +260,12 @@ func selectAuthMethod(config: CLIConfig, allowBootstrapToken: Bool = false) -> A
     if allowBootstrapToken && isBootstrapTokenEscrowed() {
         return .bootstrapToken
     }
-    // User-saved login password — top priority for direct CLI installs.
-    // Highest priority because it's the user's own credential, always
-    // authorized for their own machine. Only valid when the user is
-    // actually logged in (login keychain is unlocked).
+    // System Keychain is preferred for production because the root daemon can
+    // read it without prompting the user on every LaunchDaemon run.
+    if let pwd = keychainPassword(), !pwd.isEmpty {
+        return .keychain
+    }
+    // Legacy user-saved login password fallback for older installs.
     if let consoleUser = consoleUser()?.name,
        userPasswordExistsInLoginKeychain(account: consoleUser) {
         return .userSavedPassword
@@ -276,9 +278,6 @@ func selectAuthMethod(config: CLIConfig, allowBootstrapToken: Bool = false) -> A
         && (jamfLapsKeychainSecretExists() || !config.jamf.laps.clientSecret.isEmpty)
     {
         return .laps
-    }
-    if let pwd = keychainPassword(), !pwd.isEmpty {
-        return .keychain
     }
     if !config.auth.localPassword.isEmpty {
         return .config
