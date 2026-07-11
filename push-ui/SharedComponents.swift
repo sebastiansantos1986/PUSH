@@ -35,6 +35,7 @@ struct TrafficLights: View {
                 Circle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(width: 12, height: 12)
+                    .onTapGesture { recordTamperAttempt("disabled close button clicked") }
             }
             // Minimize always disabled during forced install
             if !isForced {
@@ -45,6 +46,7 @@ struct TrafficLights: View {
                 Circle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(width: 12, height: 12)
+                    .onTapGesture { recordTamperAttempt("disabled minimize button clicked") }
             }
         }
         .onHover { hovering = $0 }

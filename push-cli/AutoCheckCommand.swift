@@ -52,6 +52,21 @@ struct AutoCheckCommand {
             exit(0)
         }
 
+        let current = currentMacOSVersion()
+
+        // Wallpaper is passive compliance signaling, not a nudge. Non-compliant
+        // Macs get PUSH's non-compliant background; compliant Macs only switch
+        // back if PUSH's non-compliant background is still set.
+        if !isDryRun {
+            let wallpaper = WallpaperManager(config: config)
+            switch WallpaperManager.currentDesiredState(config: config) {
+            case .nonCompliant:
+                wallpaper.applyIfStateChanged(.nonCompliant)
+            case .compliant:
+                wallpaper.applyCompliantIfReplacingNonCompliant()
+            }
+        }
+
         // Alert window check — skip outside business hours / weekends
         if !isDryRun && !isForced && !isWithinAlertWindow(config: config) {
             cliLog("[AutoCheck] Outside alert window — skipping nudge")
@@ -59,7 +74,6 @@ struct AutoCheckCommand {
             exit(0)
         }
 
-        let current = currentMacOSVersion()
         cliSection("🔍 Checking for macOS updates")
         cliInfo("Current macOS:", current)
         cliInfo("Config target:", config.update.targetVersion.isEmpty ? "(not set)" : config.update.targetVersion)
@@ -125,6 +139,7 @@ struct AutoCheckCommand {
                         cliSuccess("Jamf inventory updated")
                     }
                 }
+                WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
                 runUptimeCheckIfAllowed(config: config)
                 exit(0)
             }
@@ -163,6 +178,7 @@ struct AutoCheckCommand {
             } else {
                 cliSuccess("No updates found. \(current) is current.")
                 cliLog("[AutoCheck] No updates found")
+                WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
                 runUptimeCheckIfAllowed(config: config)
             }
             exit(0)
@@ -591,10 +607,17 @@ struct AutoCheckCommand {
             deferrals:  state.deferralCount
         )
 
-        // Compliance wallpaper — only changes if state transitioned. Honors
-        // wallpaperEnabled in config, no-op if disabled.
+        // Compliance wallpaper. While non-compliant, PUSH owns the visual
+        // signal. Once compliant, only replace PUSH's own non-compliant image;
+        // leave any user-chosen wallpaper alone.
         let desiredWallpaper: WallpaperState = isCompliant ? .compliant : .nonCompliant
-        WallpaperManager(config: config).applyIfStateChanged(desiredWallpaper)
+        let wallpaper = WallpaperManager(config: config)
+        switch desiredWallpaper {
+        case .nonCompliant:
+            wallpaper.applyIfStateChanged(.nonCompliant)
+        case .compliant:
+            wallpaper.applyCompliantIfReplacingNonCompliant()
+        }
 
         try? saveState(state)
     }
@@ -857,18 +880,29 @@ extension AutoCheckCommand {
     /// a saved password, and we'll try again on the next nudge.
     private func captureUserPasswordIfNeeded(config: CLIConfig, uiPath: String, cfgPath: String) {
         guard isAppleSilicon() else { return }
-        guard let user = consoleUser()?.name, !user.isEmpty else { return }
+        guard let console = consoleUser(), !console.name.isEmpty else { return }
+
+        if let account = try? loadConfig().auth.localAccount,
+           !account.isEmpty,
+           let pwd = keychainPassword(),
+           validateUserPassword(account: account, password: pwd) {
+            cliLog("[AutoCheck] System Keychain password already valid for \(account) — skipping capture")
+            return
+        }
 
         // Already have a saved password? Validate it before assuming it works.
-        if userPasswordExistsInLoginKeychain(account: user) {
-            if let pwd = readUserPasswordFromLoginKeychain(account: user),
-               validateUserPassword(account: user, password: pwd) {
-                cliLog("[AutoCheck] User \(user) already has a valid saved password — skipping capture")
+        if userPasswordExistsInLoginKeychain(account: console.name) {
+            if let pwd = readUserPasswordFromLoginKeychain(account: console.name),
+               validateUserPassword(account: console.name, password: pwd) {
+                if storeSystemKeychainPassword(account: console.name, password: pwd) {
+                    deleteUserPasswordFromLoginKeychain(account: console.name)
+                }
+                cliLog("[AutoCheck] User \(console.name) already has a valid saved password — migrated to System Keychain")
                 return
             }
             // Saved but invalid (changed macOS password, etc.) — delete and re-prompt
-            cliLog("[AutoCheck] Saved password for \(user) is invalid — clearing and re-prompting")
-            deleteUserPasswordFromLoginKeychain(account: user)
+            cliLog("[AutoCheck] Saved password for \(console.name) is invalid — clearing and re-prompting")
+            deleteUserPasswordFromLoginKeychain(account: console.name)
         }
 
         cliLog("[AutoCheck] No valid saved password — prompting user (will save on success)")
@@ -878,7 +912,13 @@ extension AutoCheckCommand {
         let cmd = "\"\(uiPath)\" --state passwordPrompt --config \"\(cfgPath)\""
         let result = runUIBlocking(cmd)
         if Int(result) == 0 {
-            cliLog("[AutoCheck] Password captured and saved for \(user)")
+            if let pwd = consumePasswordHandoff(for: console),
+               validateUserPassword(account: console.name, password: pwd),
+               storeSystemKeychainPassword(account: console.name, password: pwd) {
+                cliLog("[AutoCheck] Password captured and saved in System Keychain for \(console.name)")
+            } else {
+                cliLog("[AutoCheck] Password prompt succeeded but System Keychain storage failed")
+            }
         } else {
             cliLog("[AutoCheck] User canceled password prompt — proceeding without saved password")
         }

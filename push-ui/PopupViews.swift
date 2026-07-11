@@ -1085,7 +1085,7 @@ struct PasswordView: View {
             PushDivider()
             VStack(spacing: 16) {
                 Text(config.ui.passwordPromptMessage.isEmpty
-                         ? "Enter the password for \(localAccount.isEmpty ? "your account" : "\\(localAccount)") to install the update.\n\nYour password will be saved securely in your login keychain so future updates can install automatically."
+                         ? "Enter the password for \(localAccount.isEmpty ? "your account" : "\\(localAccount)") to install the update.\n\nYour password will be saved securely so future updates can install automatically."
                          : config.ui.passwordPromptMessage.resolvedNewlines)
                     .font(.system(size: 13))
                     .foregroundStyle(Color(NSColor.secondaryLabelColor))
@@ -1137,10 +1137,9 @@ struct PasswordView: View {
             DispatchQueue.main.async {
                 validating = false
                 if valid {
-                    // Save to user's login keychain for future automatic installs.
-                    // This is the disclosed behavior per the prompt text. Failure
-                    // here is logged but doesn't block the install.
-                    if saveUserPasswordToLoginKeychain(account: account, password: pwd) {
+                    // Hand the validated password back to push-cli. The root
+                    // daemon stores it once in the System Keychain.
+                    if writePasswordHandoffForRoot(account: account, password: pwd) {
                         ctx.exit(.install)
                     } else {
                         password = ""

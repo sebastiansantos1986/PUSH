@@ -86,6 +86,26 @@ func userPasswordExistsInLoginKeychain(account: String) -> Bool {
     return status == 0
 }
 
+/// Read and remove the one-time password handoff written by push-ui. The file
+/// is owned by the console user and exists only long enough for the root daemon
+/// to store the already-validated password in the System Keychain.
+func consumePasswordHandoff(for user: (name: String, uid: Int)) -> String? {
+    let path = "/tmp/push-user-password.\(user.uid)"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+
+    guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else {
+        return nil
+    }
+    let parts = raw.components(separatedBy: "\n")
+    guard parts.count >= 2 else { return nil }
+    let account = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+    let password = parts.dropFirst().joined(separator: "\n")
+        .trimmingCharacters(in: .newlines)
+
+    guard account == user.name, !password.isEmpty else { return nil }
+    return password
+}
+
 // MARK: - Internal helpers
 
 @discardableResult

@@ -2,8 +2,8 @@
 #
 # setup-jamf.sh — Automate creation of PUSH-related Jamf objects.
 #
-# Creates one Extension Attribute and six Smart Computer Groups in your
-# Jamf Pro instance, all scoped to the PUSH compliance reporting flow.
+# Creates seven Extension Attributes and operational Smart Computer Groups in
+# your Jamf Pro instance, all scoped to the PUSH reporting flow.
 #
 # DESIGN PRINCIPLES:
 #   - Read-only by default. --apply required to make any changes.
@@ -27,7 +27,7 @@
 #   ./setup-jamf.sh --jamf-url ... --client-id ... --apply --yes
 #
 # REQUIREMENTS:
-#   - bash 4+ (macOS ships with 3.2; install via brew if missing)
+#   - macOS bash 3.2+, curl, jq
 #   - curl, jq
 
 set -e
@@ -39,17 +39,17 @@ JAMF_URL=""
 CLIENT_ID=""
 APPLY=false
 YES=false
-EA_SCRIPT_PATH=""
+EA_DIR=""
 
 usage() {
     cat <<EOF
-Usage: $0 --jamf-url URL --client-id ID [--apply] [--yes] [--ea-script PATH]
+Usage: $0 --jamf-url URL --client-id ID [--apply] [--yes] [--ea-dir PATH]
 
   --jamf-url URL        Jamf Pro URL (e.g. https://yourtenant.jamfcloud.com)
   --client-id ID        OAuth Client ID with EA + Smart Group permissions
   --apply               Make changes (without this flag, dry-run only)
   --yes                 Skip per-object confirmation prompts (use with care)
-  --ea-script PATH      Path to push-os-compliance.sh (default: same directory)
+  --ea-dir PATH         Directory containing PUSH EA scripts
   --help                This message
 
 Client secret is read interactively (never on command line).
@@ -63,7 +63,7 @@ while [ $# -gt 0 ]; do
         --client-id)  CLIENT_ID="$2"; shift 2 ;;
         --apply)      APPLY=true; shift ;;
         --yes)        YES=true; shift ;;
-        --ea-script)  EA_SCRIPT_PATH="$2"; shift 2 ;;
+        --ea-dir)     EA_DIR="$2"; shift 2 ;;
         --help|-h)    usage ;;
         *) echo "Unknown argument: $1" >&2; usage ;;
     esac
@@ -72,15 +72,13 @@ done
 [ -z "$JAMF_URL" ] && { echo "ERROR: --jamf-url required" >&2; usage; }
 [ -z "$CLIENT_ID" ] && { echo "ERROR: --client-id required" >&2; usage; }
 
-# Default EA script path to same directory as this script
-if [ -z "$EA_SCRIPT_PATH" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    EA_SCRIPT_PATH="$SCRIPT_DIR/push-os-compliance.sh"
-fi
+# Default to the canonical EA scripts shipped with PUSH.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+[ -z "$EA_DIR" ] && EA_DIR="$SCRIPT_DIR/../jamf-ea-fix/eas"
 
-[ ! -f "$EA_SCRIPT_PATH" ] && {
-    echo "ERROR: EA script not found at $EA_SCRIPT_PATH" >&2
-    echo "Use --ea-script to specify the path" >&2
+[ ! -d "$EA_DIR" ] && {
+    echo "ERROR: EA script directory not found at $EA_DIR" >&2
+    echo "Use --ea-dir to specify the path" >&2
     exit 1
 }
 
@@ -100,7 +98,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "Jamf URL:     $JAMF_URL"
 echo "Client ID:    $CLIENT_ID"
-echo "EA script:    $EA_SCRIPT_PATH"
+echo "EA scripts:   $EA_DIR"
 if $APPLY; then
     if $YES; then
         echo "Mode:         APPLY (no prompts)"
@@ -184,11 +182,38 @@ echo "→ Reading current Jamf state…"
 EXISTING_EAS=$(api_get "/JSSResource/computerextensionattributes" || echo "")
 EXISTING_GROUPS=$(api_get "/JSSResource/computergroups" || echo "")
 
-EA_NAME="PUSH — OS Update Compliance EA"
-EA_EXISTS=false
-if echo "$EXISTING_EAS" | jq -e --arg n "$EA_NAME" '.computer_extension_attributes[]? | select(.name==$n)' >/dev/null 2>&1; then
-    EA_EXISTS=true
-fi
+declare -a EA_NAMES=(
+    "PUSH — OS Update Compliance EA"
+    "PUSH — Days Until Deadline EA"
+    "PUSH — Deferral Count EA"
+    "PUSH — Deferral Reasons EA"
+    "PUSH — Deferrals Remaining EA"
+    "PUSH — Health EA"
+    "PUSH — Reboot Status EA"
+)
+declare -a EA_FILES=(
+    "ea-os-update-compliance.sh"
+    "ea-days-until-deadline.sh"
+    "ea-deferral-count.sh"
+    "ea-deferral-reasons.sh"
+    "ea-deferrals-remaining.sh"
+    "ea-push-health.sh"
+    "ea-reboot-status.sh"
+)
+declare -a EA_TYPES=("String" "Integer" "Integer" "String" "Integer" "String" "String")
+declare -a EA_DESCRIPTIONS=(
+    "PUSH macOS update compliance state"
+    "Calendar days remaining until the configured update deadline; -1 means no deadline"
+    "Update deferrals used in the current update cycle"
+    "User-provided update deferral reasons"
+    "Update deferrals remaining in the current update cycle"
+    "PUSH installation, daemon, and auto-check health"
+    "PUSH uptime restart policy state"
+)
+
+for file in "${EA_FILES[@]}"; do
+    [ -f "$EA_DIR/$file" ] || { echo "ERROR: Missing EA script: $EA_DIR/$file" >&2; exit 1; }
+done
 
 # Smart Group definitions — name + criterion(s)
 declare -a GROUP_NAMES=(
@@ -196,7 +221,14 @@ declare -a GROUP_NAMES=(
     "PUSH: Non-Compliant - Active"
     "PUSH: Past Deadline"
     "PUSH: Install In Progress"
-    "PUSH: Not Reporting"
+    "PUSH: Not Installed"
+    "PUSH: Not Configured"
+    "PUSH: Deadline Due or Past"
+    "PUSH: Deferrals Used"
+    "PUSH: Deferrals Exhausted"
+    "PUSH: Health Attention"
+    "PUSH: Reboot Warning"
+    "PUSH: Reboot Force"
 )
 
 # Smart Group criteria, tuned to PUSH's actual output format:
@@ -204,11 +236,18 @@ declare -a GROUP_NAMES=(
 #   "Non-Compliant | Running: X.Y | Target: X.Y | Deferrals: N/M"
 #   (Past Deadline / Install In Progress formats not yet observed in production —
 #    if your EA produces something unexpected, edit the criteria after creation)
-declare -a GROUP_CRITERIA_0=("is|||Compliant|||and")
-declare -a GROUP_CRITERIA_1=("like|||Non-Compliant|||and" "not like|||Past Deadline|||and")
-declare -a GROUP_CRITERIA_2=("like|||Past Deadline|||and")
-declare -a GROUP_CRITERIA_3=("like|||Install Started|||and")
-declare -a GROUP_CRITERIA_4=("is|||Not Installed|||or" "is|||(blank)|||and")
+declare -a GROUP_CRITERIA_0=("PUSH — OS Update Compliance EA|||is|||Compliant|||and")
+declare -a GROUP_CRITERIA_1=("PUSH — OS Update Compliance EA|||like|||Non-Compliant|||and")
+declare -a GROUP_CRITERIA_2=("PUSH — OS Update Compliance EA|||like|||Past Deadline|||and")
+declare -a GROUP_CRITERIA_3=("PUSH — OS Update Compliance EA|||like|||Install Started|||and")
+declare -a GROUP_CRITERIA_4=("PUSH — OS Update Compliance EA|||is|||PUSH not installed|||or" "PUSH — Health EA|||is|||Not Installed|||or")
+declare -a GROUP_CRITERIA_5=("PUSH — OS Update Compliance EA|||is|||Not configured|||and")
+declare -a GROUP_CRITERIA_6=("PUSH — OS Update Compliance EA|||like|||Non-Compliant|||and" "PUSH — Days Until Deadline EA|||less than|||1|||and")
+declare -a GROUP_CRITERIA_7=("PUSH — Deferral Count EA|||more than|||0|||and")
+declare -a GROUP_CRITERIA_8=("PUSH — OS Update Compliance EA|||like|||Non-Compliant|||and" "PUSH — Deferrals Remaining EA|||is|||0|||and")
+declare -a GROUP_CRITERIA_9=("PUSH — Health EA|||like|||Attention|||and")
+declare -a GROUP_CRITERIA_10=("PUSH — Reboot Status EA|||like|||Warning|||and")
+declare -a GROUP_CRITERIA_11=("PUSH — Reboot Status EA|||like|||Force|||and")
 
 # ── Print plan ────────────────────────────────────────────────────────────────
 
@@ -218,13 +257,14 @@ echo "  PLAN"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
-if $EA_EXISTS; then
-    echo "  [SKIP] Extension Attribute '$EA_NAME' already exists"
-else
-    echo "  [CREATE] Extension Attribute: $EA_NAME"
-    echo "           Type: Script"
-    echo "           Source: $EA_SCRIPT_PATH"
-fi
+for idx in "${!EA_NAMES[@]}"; do
+    name="${EA_NAMES[$idx]}"
+    if echo "$EXISTING_EAS" | jq -e --arg n "$name" '.computer_extension_attributes[]? | select(.name==$n)' >/dev/null 2>&1; then
+        echo "  [SKIP] Extension Attribute '$name' already exists"
+    else
+        echo "  [CREATE] Extension Attribute: $name (${EA_TYPES[$idx]})"
+    fi
+done
 echo ""
 
 for idx in "${!GROUP_NAMES[@]}"; do
@@ -255,14 +295,21 @@ fi
 
 # ── Create the EA ─────────────────────────────────────────────────────────────
 
-if ! $EA_EXISTS; then
-    echo "→ Extension Attribute: $EA_NAME"
+# Create missing EAs. Existing EAs are never overwritten by this setup tool;
+# use jamf-ea-fix/update-jamf-eas.sh when an existing script needs an update.
+for idx in "${!EA_NAMES[@]}"; do
+    name="${EA_NAMES[$idx]}"
+    if echo "$EXISTING_EAS" | jq -e --arg n "$name" '.computer_extension_attributes[]? | select(.name==$n)' >/dev/null 2>&1; then
+        continue
+    fi
+
+    echo "→ Extension Attribute: $name"
     if confirm "  Create now?"; then
-        EA_SCRIPT_BODY=$(cat "$EA_SCRIPT_PATH" | xml_escape)
+        EA_SCRIPT_BODY=$(cat "$EA_DIR/${EA_FILES[$idx]}" | xml_escape)
         EA_XML="<computer_extension_attribute>
-  <name>${EA_NAME}</name>
-  <description>PUSH compliance state. Generated by setup-jamf.sh.</description>
-  <data_type>String</data_type>
+  <name>${name}</name>
+  <description>${EA_DESCRIPTIONS[$idx]}. Generated by setup-jamf.sh.</description>
+  <data_type>${EA_TYPES[$idx]}</data_type>
   <input_type>
     <type>script</type>
     <platform>Mac</platform>
@@ -276,7 +323,7 @@ if ! $EA_EXISTS; then
         # Verify
         sleep 1
         if api_get "/JSSResource/computerextensionattributes" \
-            | jq -e --arg n "$EA_NAME" '.computer_extension_attributes[]? | select(.name==$n)' >/dev/null 2>&1; then
+            | jq -e --arg n "$name" '.computer_extension_attributes[]? | select(.name==$n)' >/dev/null 2>&1; then
             echo "  ✓ Created"
         else
             echo "  ✗ Verification failed. Response: $RESPONSE" >&2
@@ -286,7 +333,7 @@ if ! $EA_EXISTS; then
         echo "  Skipped"
     fi
     echo ""
-fi
+done
 
 # ── Create Smart Groups ───────────────────────────────────────────────────────
 
@@ -295,15 +342,16 @@ build_criteria_xml() {
     local xml="<criteria>"
     local i=0
     for c in "${criteria_array[@]}"; do
-        IFS='|||' read -r op value and_or <<< "$c"
+        IFS='|||' read -r criterion_name op value and_or <<< "$c"
         # Triple pipe split actually uses single-char separators in bash;
         # work around with parameter substitution instead.
-        op=$(echo "$c" | awk -F'\\|\\|\\|' '{print $1}')
-        value=$(echo "$c" | awk -F'\\|\\|\\|' '{print $2}')
-        and_or=$(echo "$c" | awk -F'\\|\\|\\|' '{print $3}')
+        criterion_name=$(echo "$c" | awk -F'\\|\\|\\|' '{print $1}')
+        op=$(echo "$c" | awk -F'\\|\\|\\|' '{print $2}')
+        value=$(echo "$c" | awk -F'\\|\\|\\|' '{print $3}')
+        and_or=$(echo "$c" | awk -F'\\|\\|\\|' '{print $4}')
         xml+="
     <criterion>
-      <name>${EA_NAME}</name>
+      <name>${criterion_name}</name>
       <priority>${i}</priority>
       <and_or>${and_or}</and_or>
       <search_type>${op}</search_type>

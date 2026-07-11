@@ -50,6 +50,9 @@ struct PopupCommand {
         if state == "error" {
             if let e = argValue("--error", in: args) { cmd += " --error \"\(e)\"" }
         }
+        if args.contains("--forced") {
+            cmd += " --forced"
+        }
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
@@ -64,8 +67,17 @@ struct PopupCommand {
         } else {
             exitCode = Int(runUIBlocking(cmd))
         }
+        drainUITamperEvents()
 
         let isRebootState = (state == "rebootNudge" || state == "rebootForce")
+        let isLockedState = args.contains("--forced")
+            || state == "downloading"
+            || state == "installing"
+            || state == "hardBlock"
+            || state == "passwordPrompt"
+            || state == "preflightDisk"
+            || state == "preflightPower"
+            || state == "rebooting"
 
         switch exitCode {
         case 0:
@@ -96,7 +108,26 @@ struct PopupCommand {
                 }
             }
         case 4: cliPrint("Power timeout")
-        default: cliLog("[Popup] Exited with code \(exitCode)")
+        default:
+            if isLockedState && (exitCode == 143 || exitCode == 137 || exitCode == 9 || exitCode == 15) {
+                cliLog("[Tamper] Locked popup '\(state)' exited with code \(exitCode) — possible force quit or killed popup")
+            } else {
+                cliLog("[Popup] Exited with code \(exitCode)")
+            }
         }
+    }
+
+    private func drainUITamperEvents() {
+        let path = "/tmp/push-ui-tamper-events.log"
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
+              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+
+        for line in raw.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            cliLog("[Tamper] \(trimmed)")
+        }
+        try? FileManager.default.removeItem(atPath: path)
     }
 }

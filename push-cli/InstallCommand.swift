@@ -134,7 +134,7 @@ struct InstallWorkflow {
             return
         }
 
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart")
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart\(forcedUIFlag)")
         Thread.sleep(forTimeInterval: 2.0)
 
         var state = loadState(); state.installStarted = true; try? saveState(state)
@@ -143,10 +143,13 @@ struct InstallWorkflow {
         // Uses super's exact pattern for macOS 13+ Apple Silicon:
         //   echo pwd | launchctl asuser <uid> sudo -u root softwareupdate --install ... --user <acct> --stdinpass
         // --force is required — without it softwareupdate ignores queued updates.
-        streamNativeInstall(label: label, creds: creds, user: user)
+        streamNativeInstall(label: label, creds: creds, user: user,
+                            uiPath: uiPath, cfgPath: cfgPath)
     }
 
-    private func streamNativeInstall(label: String, creds: InstallCredentials?, user: (name: String, uid: Int)) {
+    private func streamNativeInstall(label: String, creds: InstallCredentials?,
+                                     user: (name: String, uid: Int),
+                                     uiPath: String, cfgPath: String) {
         let progressFile = "/tmp/push-install-progress"
         let logFile      = "/tmp/push-native-install.log"
         let doneFile     = "/tmp/push-native-done.flag"
@@ -195,6 +198,10 @@ struct InstallWorkflow {
         var processedLines = 0
         while process.isRunning {
             Thread.sleep(forTimeInterval: 1.5)
+            ensureActiveInstallUI(state: "installing",
+                                  uiPath: uiPath,
+                                  cfgPath: cfgPath,
+                                  extraArgs: "--quick-restart")
             guard let raw = try? String(contentsOfFile: logFile, encoding: .utf8) else { continue }
             let lines    = raw.components(separatedBy: "\n").filter { !$0.isEmpty }
             let newLines = Array(lines.dropFirst(processedLines))
@@ -341,7 +348,7 @@ struct InstallWorkflow {
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\"")
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\"\(forcedUIFlag)")
         Thread.sleep(forTimeInterval: 2.0)
 
         runStartOSInstall(installer: installer, creds: creds,
@@ -368,7 +375,7 @@ struct InstallWorkflow {
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.5)
-        launchUIAsUser("\"\(uiPath)\" --state downloading --config \"\(cfgPath)\" --download-progress 0 --download-subtitle \"Preparing download…\"")
+        launchUIAsUser("\"\(uiPath)\" --state downloading --config \"\(cfgPath)\" --download-progress 0 --download-subtitle \"Preparing download…\"\(forcedUIFlag)")
         Thread.sleep(forTimeInterval: 1.0)
 
         let isMajor = config.update.releaseType == "major"
@@ -384,7 +391,9 @@ struct InstallWorkflow {
 
             let mistOK = streamDownload(
                 cmd:  "\"\(mist)\" download installer \"\(version)\" application --output-directory \"/Applications\" --compatible --force --no-ansi",
-                tool: "mist-cli"
+                tool: "mist-cli",
+                uiPath: uiPath,
+                cfgPath: cfgPath
             )
             if mistOK, let found = findInstallerInApplications() {
                 cliLog("[Install] mist-cli succeeded: \(found)")
@@ -414,7 +423,9 @@ struct InstallWorkflow {
         cliLog("[Install] Using softwareupdate --fetch-full-installer \(version)")
         let swuOK = streamDownload(
             cmd:  "softwareupdate --fetch-full-installer --full-installer-version \"\(version)\"",
-            tool: "softwareupdate"
+            tool: "softwareupdate",
+            uiPath: uiPath,
+            cfgPath: cfgPath
         )
         if swuOK, let found = findInstallerInApplications() {
             cliLog("[Install] softwareupdate succeeded: \(found)")
@@ -436,7 +447,9 @@ struct InstallWorkflow {
         cliLog("[Install] Last resort — mist-cli at \(mist)")
         let mistOK2 = streamDownload(
             cmd:  "\"\(mist)\" download installer \"\(version)\" application --output-directory \"/Applications\" --compatible --force --no-ansi",
-            tool: "mist-cli"
+            tool: "mist-cli",
+            uiPath: uiPath,
+            cfgPath: cfgPath
         )
         if mistOK2, let found = findInstallerInApplications() {
             cliLog("[Install] mist-cli (last resort) succeeded: \(found)")
@@ -450,7 +463,8 @@ struct InstallWorkflow {
     }
 
     @discardableResult
-    private func streamDownload(cmd: String, tool: String) -> Bool {
+    private func streamDownload(cmd: String, tool: String,
+                                uiPath: String, cfgPath: String) -> Bool {
         let logFile     = "/tmp/push-dl-progress.log"
         let doneFile    = "/tmp/push-dl-done.flag"
         let wrapperPath = "/tmp/push-dl-wrapper.sh"
@@ -515,6 +529,10 @@ echo "DONE" > "\(doneFile)"
 
         while process.isRunning || !FileManager.default.fileExists(atPath: doneFile) {
             Thread.sleep(forTimeInterval: 3.0)
+            ensureActiveInstallUI(state: "downloading",
+                                  uiPath: uiPath,
+                                  cfgPath: cfgPath,
+                                  extraArgs: "--download-progress 0 --download-subtitle \"Preparing download…\"")
 
             // Parse stdout lines — used for mist-cli (outputs real %)
             // For softwareupdate we skip since its % is an internal stage counter
@@ -835,6 +853,9 @@ echo "DONE" > "\(doneFile)"
         var lastPct = 0.0
         while proc.isRunning {
             Thread.sleep(forTimeInterval: 3.0)
+            ensureActiveInstallUI(state: "installing",
+                                  uiPath: uiPath,
+                                  cfgPath: cfgPath)
 
             // Time-based simulation: 0→92% over 15 min, eased so it feels natural
             let elapsed  = Date().timeIntervalSince(startTime)
@@ -898,11 +919,10 @@ echo "DONE" > "\(doneFile)"
                 cliLog("[Install] Triggering jamf recon post-install")
                 shell("\"\(config.jamf.binaryPath)\" recon 2>/dev/null")
             }
-            // Compliance wallpaper — force the compliant variant immediately,
-            // even though the actual reboot is pending. The Mac is now on the
-            // target version (post-startosinstall the bits are committed).
-            // applyForce ignores the transition tracker so it always fires here.
-            WallpaperManager(config: config).applyForce(.compliant)
+            // Compliance wallpaper — once compliant, only replace PUSH's own
+            // non-compliant image. If the user already picked a different
+            // wallpaper, preserve it.
+            WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
         } else {
             cliLog("[Install] startosinstall may have failed. Log tail:\n\(finalLog.components(separatedBy: "\n").suffix(15).joined(separator: "\n"))")
             shell("pkill -x push-ui 2>/dev/null || true")
@@ -934,6 +954,46 @@ echo "DONE" > "\(doneFile)"
     }
 
     // MARK: - Helpers
+
+    private var forcedUIFlag: String {
+        skipInitialPrompt ? " --forced" : ""
+    }
+
+    private func ensureActiveInstallUI(state: String,
+                                       uiPath: String,
+                                       cfgPath: String,
+                                       extraArgs: String = "") {
+        guard skipInitialPrompt else { return }
+        guard FileManager.default.fileExists(atPath: uiPath) else { return }
+
+        drainUITamperEvents()
+
+        let (pids, _) = shell("pgrep -x push-ui 2>/dev/null")
+        if !pids.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return
+        }
+
+        cliLog("[Tamper] Forced \(state) UI was not running — possible force quit or killed popup; relaunching while update continues")
+        var cmd = "\"\(uiPath)\" --state \(state) --config \"\(cfgPath)\"\(forcedUIFlag)"
+        if !extraArgs.isEmpty {
+            cmd += " \(extraArgs)"
+        }
+        launchUIAsUser(cmd)
+    }
+
+    private func drainUITamperEvents() {
+        let path = "/tmp/push-ui-tamper-events.log"
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
+              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+
+        for line in raw.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            cliLog("[Tamper] \(trimmed)")
+        }
+        try? FileManager.default.removeItem(atPath: path)
+    }
 
     private func findExistingInstaller() -> String? {
         for dir in ["\(managedBase)/downloads", "/Applications"] {
@@ -969,12 +1029,13 @@ echo "DONE" > "\(doneFile)"
             let status = runUIBlocking("\"\(uiPath)\" --state passwordPrompt --config \"\(cfgPath)\"\(forcedFlag)")
 
             if status == 0 {
-                guard let user = consoleUser()?.name else { return nil }
-                if let pwd = readUserPasswordFromLoginKeychain(account: user),
-                   validateUserPassword(account: user, password: pwd) {
+                guard let user = consoleUser() else { return nil }
+                if let pwd = consumePasswordHandoff(for: user),
+                   validateUserPassword(account: user.name, password: pwd) {
+                    _ = storeSystemKeychainPassword(account: user.name, password: pwd)
                     return pwd
                 }
-                cliLog("[Install] Password prompt succeeded but saved password was not retrievable")
+                cliLog("[Install] Password prompt succeeded but handoff was not retrievable")
             } else if skipInitialPrompt {
                 // During forced install — user tried to dismiss, show again
                 cliLog("[Install] Password prompt dismissed during forced install — retrying (attempt \(attempts))")
@@ -1021,6 +1082,10 @@ echo "DONE" > "\(doneFile)"
                                                          skipInitialPrompt: skipInitialPrompt)
             }
             if validateUserPassword(account: consoleUser, password: pwd) {
+                if storeSystemKeychainPassword(account: consoleUser, password: pwd) {
+                    deleteUserPasswordFromLoginKeychain(account: consoleUser)
+                    cliLog("[Install] Migrated saved login-keychain password to System Keychain for \(consoleUser)")
+                }
                 cliLog("[Install] Using saved login password for \(consoleUser)")
                 return InstallCredentials(username: consoleUser, password: pwd,
                                           fromSavedUserPassword: true)
