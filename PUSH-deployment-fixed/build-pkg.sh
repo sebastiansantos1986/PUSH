@@ -10,11 +10,11 @@
 #   bash build-pkg.sh                    Build unsigned pkg (for testing)
 #   bash build-pkg.sh --sign "Developer ID Installer: Your Name (TEAMID)"
 #
-# Output: PUSH-1.0.0.pkg
+# Output: PUSH-1.1.7.pkg
 
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.1.7"
 IDENTIFIER="com.push.pkg"
 INSTALL_LOCATION="/"
 OUTPUT="PUSH-${VERSION}.pkg"

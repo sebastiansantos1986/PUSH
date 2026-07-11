@@ -4,7 +4,7 @@
 
 ```
 PUSH-deployment/
-├── build-pkg.sh                  Build script — creates PUSH-1.1.0.pkg
+├── build-pkg.sh                  Build script — creates PUSH-1.1.7.pkg
 ├── push-jamf-postinstall.sh      Jamf policy script — runs after pkg installs
 ├── push-uninstall.sh             Full removal script
 └── pkg-build/
@@ -35,7 +35,7 @@ For a signed pkg (required for notarization and some MDM profiles):
 bash build-pkg.sh --sign "Developer ID Installer: Your Name (TEAMID)"
 ```
 
-This outputs `PUSH-1.1.0.pkg`.
+This outputs `PUSH-1.1.7.pkg`.
 
 ---
 
@@ -58,7 +58,7 @@ HARD_BLOCK_FULLSCREEN="false"
 ## Step 3 — Upload to Jamf Pro
 
 1. **Upload the pkg:**
-   Jamf Pro → Settings → Packages → New → Upload `PUSH-1.1.0.pkg`
+   Jamf Pro → Settings → Packages → New → Upload `PUSH-1.1.7.pkg`
 
 2. **Upload the post-install script:**
    Jamf Pro → Settings → Scripts → New → paste `push-jamf-postinstall.sh`
@@ -79,7 +79,7 @@ Jamf Pro → Computers → Policies → New:
 | Name          | PUSH — Deploy Update Enforcement   |
 | Trigger       | Recurring Check-in                 |
 | Frequency     | Once per computer                  |
-| Packages      | PUSH-1.1.0.pkg                    |
+| Packages      | PUSH-1.1.7.pkg                    |
 | Scripts       | push-jamf-postinstall.sh (After)   |
 | Scope         | All Computers (or your smart group)|
 
@@ -101,7 +101,7 @@ Jamf Pro → Computers → Policies → New:
 
 ## Step 6 — Add Extension Attributes
 
-See `PUSH-jamf-EAs/README.md` for the 4 EA scripts and smart group recommendations.
+See `jamf-setup/` and `jamf-ea-fix/eas/` for the 7 EA scripts and smart group recommendations.
 
 ---
 
@@ -142,7 +142,7 @@ push-cli config get uptime.warningThresholdDays
 
 1. Build new binaries in Xcode
 2. Run `bash build-pkg.sh` to create new pkg
-3. Update version in `build-pkg.sh` (`VERSION="1.0.1"`)
+3. Update version in `build-pkg.sh` when cutting a new release
 4. Upload new pkg to Jamf
 5. Change policy frequency to "Once per computer per version"
 

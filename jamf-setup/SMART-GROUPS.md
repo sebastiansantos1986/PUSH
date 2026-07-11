@@ -57,7 +57,7 @@ Jamf without another script:
 - Repeated deferrers: `PUSH — Deferral Count EA` more than `2`
 - Meeting-related deferrals: `PUSH — Deferral Reasons EA` like `Meeting`
 - Stale automation: `PUSH — Health EA` like `Auto-check stale`
-- Specific PUSH release: `PUSH — Health EA` like `Version 1.1.0`
+- Specific PUSH release: `PUSH — Health EA` like `Version 1.1.7`
 
 Do not build a group using only `Days Until Deadline = -1`; that value means no
 deadline is configured. Combine deadline criteria with a non-compliant state.

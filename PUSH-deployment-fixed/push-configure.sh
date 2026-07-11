@@ -1,7 +1,7 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  PUSH — Configuration Script                                                ║
-# ║  Run after deploying PUSH-1.1.0.pkg via Jamf or manually                   ║
+# ║  Run after deploying PUSH-1.1.7.pkg via Jamf or manually                   ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 #
 # USAGE:
@@ -24,7 +24,7 @@ CONFIG="/Library/Management/PUSH/config.yaml"
 # Verify PUSH is installed
 if [[ ! -x "$CLI" ]]; then
     echo "ERROR: push-cli not found at $CLI"
-    echo "Deploy PUSH-1.1.0.pkg first."
+    echo "Deploy PUSH-1.1.7.pkg first."
     exit 1
 fi
 

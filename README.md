@@ -4,7 +4,7 @@ A macOS update enforcement tool for Jamf-managed environments.
 
 Nudges users to install required macOS updates with a friendly UI, escalates to forced installs when deadlines pass, and reports compliance status to Jamf for fleet-wide visibility.
 
-**Current status:** v1.1 pilot-ready (May 2026). Verified end-to-end on Apple Silicon VMs upgrading 15.0 → 26.4.1.
+**Current status:** v1.1.7 production candidate (July 2026). Tested on Apple Silicon with password capture, compliance wallpaper, reboot prompts, forced-update UI hardening, and tamper logging.
 
 ---
 
@@ -32,6 +32,7 @@ This repo contains four related top-level folders:
 3. Manages the nudge/deadline lifecycle for non-compliant Macs
 4. Triggers forced install + reboot once the deadline passes
 5. Reports compliance state to Jamf via Extension Attributes
+6. Logs forced-popup tamper attempts and relaunches the locked progress UI if it is killed while the root install continues
 
 `push-ui` is a SwiftUI app that surfaces popups and toasts to the user — soft nudges, deadline reminders, install progress, reboot prompts, etc.
 
@@ -42,7 +43,9 @@ This repo contains four related top-level folders:
 **Update enforcement**
 - Soft nudge once per day until deadline (configurable interval)
 - Toast notification every hour between nudges
-- Forced install at deadline — runs `startosinstall` silently (no popup, no opt-out)
+- Forced install at deadline — shows locked progress UI while root `push-cli` keeps the update running
+- Tamper logging for blocked quit/close/hide/minimize/Escape attempts and killed locked popups
+- Watchdog relaunches forced download/install UI if `push-ui` is killed
 - mist-cli integration for major OS upgrades (downloads installer reliably)
 - Native `softwareupdate` for minor security updates
 - Auto-installs non-system updates (Safari, XProtect, etc.) without nudging
@@ -54,15 +57,15 @@ This repo contains four related top-level folders:
 - Secure-token preflight before install attempts
 
 **Compliance signaling**
-- Compliance wallpaper switching — desktop background changes when Mac falls out of compliance, restores on success
+- Compliance wallpaper switching — non-compliant Macs get the PUSH background; compliant Macs only switch back if PUSH's non-compliant wallpaper is still set
 - Uptime monitoring — separate two-phase reboot reminders for Macs that stay up too long
 - Jamf EA reporting after every auto-check
 - Auto-recon on detection and after successful upgrades
 
 **Date picker scheduling**
 - Users can choose when to install — any time before the deadline
-- Once scheduled, install runs silently at the chosen time
-- After deadline: scheduling not allowed, install fires automatically
+- Once scheduled, install runs at the chosen time before the deadline
+- After deadline: scheduling is not allowed, forced install begins automatically with locked progress UI
 
 ---
 
@@ -89,7 +92,7 @@ This repo contains four related top-level folders:
 cd PUSH-deployment-fixed
 ./build-pkg.sh
 
-# 3. Upload PUSH-1.1.0.pkg to Jamf
+# 3. Upload PUSH-1.1.7.pkg to Jamf
 #    Settings → Computer Management → Packages → Upload
 
 # 4. Create a policy
@@ -107,7 +110,7 @@ The postinstall script handles:
 ### Option 2 — Manual install (for dev/testing)
 
 ```bash
-sudo /usr/sbin/installer -pkg PUSH-1.1.0.pkg -target /
+sudo /usr/sbin/installer -pkg PUSH-1.1.7.pkg -target /
 ```
 
 That's it. The .pkg handles everything.
@@ -177,9 +180,15 @@ uptime:                          # Reboot reminders for compliant Macs
 ### Editing config
 
 ```bash
-sudo push-cli config set update.targetVersion "26.4.1"
+sudo push-cli config set update.targetVersion "26.5.2"
 sudo push-cli config get compliance.wallpaperEnabled
 sudo push-cli config show
+```
+
+The tested unsigned package artifact for this candidate is also included at:
+
+```text
+releases/PUSH-1.1.7-popup-tamper-log-unsigned.pkg
 ```
 
 ---
@@ -252,6 +261,7 @@ push-cli popup softNudge
 push-cli popup hardBlock
 push-cli popup toast
 push-cli popup downloading --download-progress 0.5
+push-cli popup downloading --download-progress 0.5 --forced   Test locked/tamper logging
 push-cli popup installing
 push-cli popup preflightDisk --disk-available 8 --disk-required 40
 push-cli popup error --error "Something went wrong"
@@ -355,8 +365,8 @@ Within alert window (8am–6pm, weekdays)?
     YES → continue
     ↓
 Past deadline?
-    YES → forced install (silent, mist-cli + startosinstall)
-          ↓ (skipped if user is screen-sharing)
+    YES → forced install with locked UI + watchdog relaunch
+          ↓ (deferred one cycle if user is screen-sharing)
     NO  → toast every hour, soft nudge once per day
     ↓
 User engages soft nudge
@@ -369,6 +379,8 @@ Install starts
     ↓
 caffeinate prevents sleep
 mist-cli downloads (major) OR softwareupdate runs (minor)
+locked progress UI records close/quit attempts as [Tamper]
+if push-ui is killed, root push-cli relaunches it while the update continues
     ↓
 startosinstall runs → reboot
     ↓
@@ -376,7 +388,7 @@ Mac comes back at target version
     ↓
 Next auto-check → jamf recon → EA shows "Compliant"
     ↓
-Wallpaper transitions back to compliant background
+Wallpaper changes to compliant only if the PUSH non-compliant wallpaper is still set
 ```
 
 ---

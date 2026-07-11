@@ -5,9 +5,9 @@
 #
 # Returns one of:
 #   Compliant
-#   Non-Compliant | Running: 15.7.4 | Target: 26.4.1 | Deferrals: 0/7
-#   Past Deadline | Running: 15.7.4 | Target: 26.4.1
-#   Install Started | Running: 15.7.4 → 26.4.1
+#   Non-Compliant | Running: 15.7.4 | Target: 26.5.2 | Deferrals: 0/7
+#   Past Deadline | Running: 15.7.4 | Target: 26.5.2
+#   Install Started | Running: 15.7.4 → 26.5.2
 #   Not configured
 #   PUSH not installed
 

@@ -7,10 +7,10 @@
 # Smart Groups filter on.
 #
 # Output formats:
-#   Compliant | 26.4.1 | Target: 26.4.1
-#   Non-Compliant | 15.0 → 26.4.1 | Deferrals: 1/7
-#   Past-Deadline | 15.0 → 26.4.1 | Install-Pending
-#   Install-Started | 15.0 → 26.4.1
+#   Compliant | 26.5.2 | Target: 26.5.2
+#   Non-Compliant | 15.0 → 26.5.2 | Deferrals: 1/7
+#   Past-Deadline | 15.0 → 26.5.2 | Install-Pending
+#   Install-Started | 15.0 → 26.5.2
 #   Reboot-Pending | Uptime: 14d
 #   Not Installed
 #
