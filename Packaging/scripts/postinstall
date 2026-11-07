@@ -13,7 +13,7 @@ if [[ -f "$base/last-package-backup.txt" ]]; then
     backup="$(/bin/cat "$base/last-package-backup.txt")"
     case "$backup" in /Library/Management/PUSH-backups/*) ;; *) exit 1 ;; esac
     [[ -d "$backup" && ! -L "$backup" && "$(/usr/bin/stat -f %u "$backup")" == 0 ]] || exit 1
-    for item in config.yaml config.json state.json detections.json apps-state.json entra-state.json health; do
+    for item in config.yaml config.json state.json detections.json apps-state.json entra-state.json preparation.json preparation notification-history.json install-recovery.json user-request-result.json assets health; do
         if [[ ! -e "$base/$item" && -e "$backup/$item" ]]; then
             /usr/bin/ditto "$backup/$item" "$base/$item"
         fi
@@ -41,7 +41,7 @@ if [[ -e /usr/local/bin/push-cli && ! -L /usr/local/bin/push-cli ]]; then
     /bin/rm /usr/local/bin/push-cli
 fi
 /bin/ln -sfn "$base/push-cli" /usr/local/bin/push-cli
-printf '%s\n' 'PUSH 1.6.0 installed for local verification.' \
+printf '%s\n' 'PUSH 1.9.1 installed for local verification.' \
     'Configuration, state, and Keychain credentials were preserved.' \
     'The previous schedule is paused. No application or upgrade was started.' \
     'Run /Library/Management/PUSH/push-cli --version to confirm the installed build.' \

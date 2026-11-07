@@ -708,6 +708,7 @@ struct InstallWorkflow {
             if pendingOutput.count > 16384 { pendingOutput = String(pendingOutput.suffix(16384)) }
         }
         if exitCode == 0 {
+            InstallRecoveryStore.staged(target:config.update.targetVersion)
             cliLog("[Install] Staging succeeded; awaiting post-reboot verification")
         } else {
             state.failInstallation()
@@ -807,6 +808,8 @@ struct InstallWorkflow {
     }
 
     private func showError(_ message: String, uiPath: String, cfgPath: String) {
+        RuntimeHealthScope.note(message,error:true)
+        InstallRecoveryStore.failure(config:config,message:message)
         cliLog("[Install] Error: \(message)")
         shell("pkill -x push-ui 2>/dev/null || true"); Thread.sleep(forTimeInterval: 0.3)
         launchUIAsUser("\"\(uiPath)\" --state error --config \"\(cfgPath)\" --error \(shellArgument(message))")

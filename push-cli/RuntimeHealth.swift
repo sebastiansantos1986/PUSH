@@ -22,6 +22,7 @@ struct RuntimeMonitorIntent: Codable {
 }
 /// Local, non-secret observations. Failure to save health must never change update behavior.
 final class RuntimeHealthScope {
+    static var currentSource:String {active?.record.source ?? "manual"}
     private static var active: RuntimeHealthScope?
     private let previous: RuntimeHealthScope?
     private var record: RuntimeHealthRecord

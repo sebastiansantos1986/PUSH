@@ -1,0 +1,34 @@
+#!/bin/bash
+# Runs as root at package install time.
+
+AUTOCHECKIN="/Library/LaunchDaemons/com.sebastianitconsulting.jamfcheckin.autocheckin.plist"
+INVENTORY="/Library/LaunchDaemons/com.sebastianitconsulting.jamfcheckin.inventory.plist"
+AGENT_LABEL="com.sebastianitconsulting.jamfcheckin"
+AGENT="/Library/LaunchAgents/${AGENT_LABEL}.plist"
+APP="/Applications/JamfCheckIn.app"
+
+# Ownership & permissions (launchd refuses plists not owned root:wheel)
+/usr/sbin/chown root:wheel "$AUTOCHECKIN" "$INVENTORY" "$AGENT" 2>/dev/null
+/bin/chmod 644 "$AUTOCHECKIN" "$INVENTORY" "$AGENT" 2>/dev/null
+/usr/sbin/chown -R root:wheel "$APP" 2>/dev/null
+
+# (Re)load the system daemons: 3-hour check-in and scheduled inventory
+for d in "$AUTOCHECKIN" "$INVENTORY"; do
+    /bin/launchctl bootout system "$d" 2>/dev/null
+    /bin/launchctl bootstrap system "$d" 2>/dev/null
+done
+
+# Force an inventory update right now (runs via launchd, survives this script)
+/bin/launchctl kickstart -k system/com.sebastianitconsulting.jamfcheckin.inventory 2>/dev/null
+
+# Load the menu bar agent for the current console user and launch it now.
+# (If no one is logged in, the agent loads automatically at next login.)
+consoleUser=$(/usr/bin/stat -f%Su /dev/console)
+if [ -n "$consoleUser" ] && [ "$consoleUser" != "root" ]; then
+    uid=$(/usr/bin/id -u "$consoleUser")
+    /bin/launchctl bootout "gui/${uid}" "$AGENT" 2>/dev/null
+    /bin/launchctl bootstrap "gui/${uid}" "$AGENT" 2>/dev/null
+    /bin/launchctl asuser "$uid" /usr/bin/open -a "$APP" 2>/dev/null
+fi
+
+exit 0

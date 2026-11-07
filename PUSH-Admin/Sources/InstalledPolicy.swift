@@ -16,6 +16,7 @@ import Foundation
 // MARK: - Root config
 
 struct DashboardConfig: Codable {
+    var compliance: DashboardComplianceConfig = .init()
     var entra: DashboardEntraConfig = .init()
     var apps: DashboardAppsConfig = .init()
     var update:    DashboardUpdateConfig    = .init()
@@ -30,6 +31,12 @@ struct DashboardConfig: Codable {
     var uptime:    DashboardUptimeConfig    = .init()
     var debug:     DashboardDebugConfig     = .init()
     var logging:   DashboardLoggingConfig   = .init()
+}
+
+struct DashboardComplianceConfig: Codable {
+    var wallpaperEnabled=false
+    var nonCompliantWallpaper="/Library/Management/PUSH/assets/wallpapers/PUSH-NonCompliant.png"
+    var compliantWallpaper="" // Empty restores the captured personal image.
 }
 
 struct DashboardEntraConfig: Codable, Equatable {
@@ -64,6 +71,11 @@ struct DashboardAppsConfig: Codable {
 }
 
 struct DashboardUpdateConfig: Codable {
+    var deadlineRecoveryEnabled=true
+    var retryCountdownMinutes=10
+    var retryBackoffMinutes=30
+    var maxAutomaticRetriesPerDay=3
+    var allowUserUpdateRequests=true
     var targetVersion:               String = ""
     var macOSName:                   String = "macOS"
     var releaseType:                 String = "minor"
@@ -75,12 +87,14 @@ struct DashboardUpdateConfig: Codable {
     var toastIntervalSeconds:        Int    = 3600   // how often toast appears (default 1 hour)
     var silentInstallAfterDeadline:  Bool   = false
     var autoInstallAfterDeadline:     Bool   = true   // Auto-download+install when deadline passes
+    var prepareAtDeadlineWhenLoggedOut: Bool = true
     var forceRestartAfterInstall:    Bool   = false
     var requirePasswordOnAppleSilicon: Bool = true
     var selfUpdateURL: String = ""   // GitHub releases API URL for self-update
 }
 
 struct DashboardUIConfig: Codable {
+    var menuBarEnabled=true
     var appName:                 String = "Software Update Required"
     var orgName:                 String = ""
     var accentColorHex:          String = "#0A84FF"
@@ -157,6 +171,7 @@ struct DashboardAutoConfig: Codable {
 }
 
 struct DashboardScheduleConfig: Codable {
+    var respectAlertWindow: Bool = false
     var alertStartHour:       Int  = 8
     var alertEndHour:         Int  = 18
     var skipWeekends:         Bool = true
@@ -262,6 +277,11 @@ struct DashboardDeferralState: Codable {
     var lastRecoveryMessage: String? = nil
     var installTargetVersion: String? = nil
     var installBootTimestamp: Double? = nil
+    var lastToastTarget: String? = nil
+    var deadlineNoticeTarget: String? = nil
+    var lastToastShownAt: Date? = nil
+    var notificationPendingSince: Date? = nil
+    var deadlineNoticeShownAt: Date? = nil
     var deadlineNotifiedAt: Date?  = nil
     var gracePeriodUntil:   Date?  = nil   // IT-granted extension
     var deferralReasons:    [String] = []  // reasons user gave when deferring
@@ -308,6 +328,11 @@ extension DashboardConfig {
         }
 
         let root = parseYAMLDict(source)
+        if let wall=root["compliance"] as? [String:Any] {
+            c.compliance.wallpaperEnabled=boo(wall,"wallpaperEnabled",false)
+            c.compliance.nonCompliantWallpaper=str(wall,"nonCompliantWallpaper",c.compliance.nonCompliantWallpaper)
+            c.compliance.compliantWallpaper=str(wall,"compliantWallpaper","")
+        }
 
         if let e = root["entra"] as? [String:Any] {
             c.entra.enabled = boo(e,"enabled",false)
@@ -335,6 +360,12 @@ extension DashboardConfig {
             c.apps.installomatorPath = str(a,"installomatorPath",c.apps.installomatorPath)
         }
         if let u = root["update"] as? [String: Any] {
+            c.update.deadlineRecoveryEnabled=boo(u,"deadlineRecoveryEnabled",true)
+            c.update.retryCountdownMinutes=int(u,"retryCountdownMinutes",10)
+            c.update.retryBackoffMinutes=int(u,"retryBackoffMinutes",30)
+            c.update.maxAutomaticRetriesPerDay=int(u,"maxAutomaticRetriesPerDay",3)
+            c.update.allowUserUpdateRequests=boo(u,"allowUserUpdateRequests",true)
+            c.update.prepareAtDeadlineWhenLoggedOut = boo(u,"prepareAtDeadlineWhenLoggedOut",true)
             c.update.targetVersion                = str(u, "targetVersion")
             c.update.macOSName                    = str(u, "macOSName", "macOS")
             c.update.releaseType                  = str(u, "releaseType", "minor")
@@ -352,6 +383,7 @@ extension DashboardConfig {
         }
 
         if let u = root["ui"] as? [String: Any] {
+            c.ui.menuBarEnabled=boo(u,"menuBarEnabled",true)
             c.ui.appName                  = str(u, "appName",   c.ui.appName)
             c.ui.orgName                  = str(u, "orgName",   "")
             c.ui.accentColorHex           = str(u, "accentColorHex", "#0A84FF")
@@ -418,6 +450,7 @@ extension DashboardConfig {
         }
 
         if let s = root["schedule"] as? [String: Any] {
+            c.schedule.respectAlertWindow = boo(s,"respectAlertWindow",false)
             c.schedule.alertStartHour                 = int(s, "alertStartHour",                8)
             c.schedule.alertEndHour                   = int(s, "alertEndHour",                  18)
             c.schedule.skipWeekends                   = boo(s, "skipWeekends",                  true)
@@ -570,4 +603,4 @@ extension DashboardConfig {
     }
 }
 
-private enum DashboardError: Error { case configNotFound }
+private enum DashboardError: Error {case configNotFound}

@@ -16,6 +16,7 @@ import SwiftUI
 // MARK: - Popup states
 
 enum UIState: String {
+    case updateRecovery = "updateRecovery"
     case toast          = "toast"
     case appUpdates     = "appUpdates"
     case entraRegistration = "entraRegistration"
@@ -38,6 +39,7 @@ enum UIState: String {
 
     var windowTitle: String {
         switch self {
+        case .updateRecovery: return "Update needs attention"
         case .toast:          return "Software Update"
         case .appUpdates:     return "Application Updates"
         case .entraRegistration: return "Microsoft Entra Registration"
@@ -60,6 +62,7 @@ enum UIState: String {
 // MARK: - Exit codes
 
 enum PushExitCode: Int32 {
+    case automaticRetry  = 7   // Countdown result; never a user Install choice
     case install         = 0   // User clicked Install / power detected / restart confirmed
     case defer_          = 1   // User clicked Remind Me Later (uses 1 deferral)
     case dismiss         = 2   // User dismissed (X / ESC / Skip)
@@ -73,6 +76,8 @@ enum PushExitCode: Int32 {
 // MARK: - Shared runtime context
 
 class UIContext: ObservableObject {
+    var informationalToastMessage: String?
+    var recoveryNotice=RecoveryNotice.preview()
     let isPreview = true
     let isManualTest = true
     var onPreviewAction: ((String, String, Int32?, Bool) -> Void)?
@@ -118,6 +123,7 @@ class UIContext: ObservableObject {
     }
     func exit(_ code: PushExitCode, automatic: Bool = false) {
         switch code {
+        case .automaticRetry: demoAction="SIMULATED: Recovery countdown reached. No update request was sent."
         case .install: demoAction = state == .entraRegistration ? "SIMULATED: Register Now selected. Self Service was not opened." : state == .appUpdates ? "SIMULATED: Update Closed Apps selected. No apps were updated." : "SIMULATED: Install / restart accepted. No action was sent to PUSH."
         case .defer_: demoAction = "SIMULATED: Reminder deferred. No settings were saved."
         case .contactSupport: demoAction = "SIMULATED: Support contact opened. No email was sent."

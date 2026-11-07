@@ -1,0 +1,124 @@
+PUSH Around-the-Clock Updates — engine 1.7.0 / Admin 0.7.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+INSTALL IT YOURSELF
+1. Quit PUSH Admin and allow active PUSH commands/workflows to finish.
+2. Install PUSH-Always-On-0.7.0.pkg.
+3. Open /Applications/PUSH Admin.app and review Readiness / Guided Setup.
+4. Verify /Library/Management/PUSH/push-cli --version reports v1.7.0.
+5. When ready for your INSTALLED LIVE POLICY to run, enable monitoring yourself:
+   sudo /Library/Management/PUSH/push-cli install-daemon --interval 5m
+
+The installer preserves your settings/state/credentials, backs up previous files,
+and pauses both monitors. It never bootstraps monitoring, launches PUSH, downloads
+macOS, updates apps, registers this Mac, or restarts it. The final enable command
+above IS live activation and can run immediately. Existing automatic installation,
+non-system-update, approved-app and registration choices remain authoritative.
+Review them before enabling. No live activation or installation was run by the agent.
+
+WHY THERE MAY HAVE BEEN NO TOAST
+Weekend working-hour suppression was one cause. A stopped/missing monitor is another:
+a saved Next toast: Now (due) value does not run a background process. Check Readiness
+for actual service status and the last scheduled observation. Installing any of these
+local-test packages intentionally pauses monitoring until you explicitly enable it.
+
+WHAT CHANGED
+- schedule.respectAlertWindow is now supported and defaults to false, including for
+  older preserved YAML that omits it. macOS/app reminders may run 24/7, weekends too.
+- Saved schedule.alertStartHour, alertEndHour and skipWeekends values are retained.
+  Set respectAlertWindow true later to restore that saved restriction.
+- Working-hour restrictions do not postpone due OS deadline handling. Meeting/VPN,
+  authorization, DDM, power, disk, competing-installer and pending-reboot protections
+  still apply. Entra has its own independent reminder hours; they are not changed.
+- New schedules default to five-minute checks. Toast eligibility remains controlled
+  by update.toastIntervalSeconds (3600 is hourly). Existing schedules must be
+  recreated with the command above to change their interval.
+- First awareness is queued per target. After login, the queued toast comes before
+  the regular full prompt where ordinary reminder policy applies. Full prompts keep
+  their separate daily schedule. It is not a promise that a toast appears every
+  sixty minutes regardless of sleep, session availability, meetings or active work.
+- Failed/missing-window attempts do not consume a toast interval or advance the
+  full-prompt dates. Visible responses and displayed-window timeouts are distinguished
+  from startup failures. Install, Later and close remain separate actions.
+- Before an enabled forced deadline installation, a status-only toast explains that
+  enforcement is about to proceed. It has Got it, not an installation-consent button.
+  Dismissing it does not postpone configured enforcement. It auto-closes after 30s;
+  the controller's wait is bounded to one minute. With-UI enforcement waits/retries
+  if the notice cannot be displayed; explicitly configured silent enforcement can
+  proceed under its existing policy after recording a display failure.
+
+NO LOGGED-IN USER AT THE DEADLINE
+update.prepareAtDeadlineWhenLoggedOut defaults to true. During an enabled, live
+macOS check, if the deadline is due and no desktop user is logged in, PUSH can run
+DOWNLOAD-ONLY preparation. It never calls the OS installation workflow or restart
+from this headless preparation path, and it does not read user credentials.
+
+Native updates use softwareupdate --download for the exact parsed target label.
+Full installers use softwareupdate --fetch-full-installer with the numeric target.
+These commands can fetch/cache installer content; they never pass --install or
+--restart. An existing matching full installer can be reused. Installation still
+revalidates the target, installer and authorization later. A native download command
+success is recorded honestly as a completed command, not proof that cache contents
+will remain available forever.
+
+Disk, configured power/network/VPN checks, protected installation locks, other
+installer activity and pending reboot state can defer preparation. Errors are
+recorded with a retry delay; no credential prompt or repeated five-minute download
+loop is introduced. Full installers may be unavailable for a particular target,
+and Apple's tools can refuse a download; this is recorded rather than bypassed.
+
+Awareness stays queued while logged out. If a user logs in during a long download,
+the worker attempts a short informational download-status toast; this does not count
+as a completed queued reminder merely because launch was attempted. The next normal
+check retries the queued awareness and/or deadline notice with display confirmation.
+The download worker never turns a Got it response into installation consent.
+
+A toast cannot be displayed while the computer is asleep or at the login window.
+Background checks require the Mac to be awake and able to reach the update servers.
+PUSH resumes policy evaluation at its next eligible check; there is no fabricated
+notification delivery for a session that does not exist.
+
+OPTIONAL YAML — MERGE INTO EXISTING SECTIONS
+schedule:
+  respectAlertWindow: false
+  alertStartHour: 8
+  alertEndHour: 18
+  skipWeekends: true
+update:
+  toastIntervalSeconds: 3600
+  prepareAtDeadlineWhenLoggedOut: true
+
+Or after installing the new CLI:
+sudo /Library/Management/PUSH/push-cli config set schedule.respectAlertWindow false
+sudo /Library/Management/PUSH/push-cli config set update.prepareAtDeadlineWhenLoggedOut true
+
+The new CLI defaults already match these choices. Turning on monitoring remains
+separate. Global debug.dryRun and auto.enabled remain respected. Missing unattended
+installation authorization is still an IT setup issue; user-password fallback is
+still disabled. This package does not enroll the Mac or provision authorization.
+
+PREVIEW AND STATUS
+In Guided Setup > Preview, select the Toast and enable Preview the informational
+deadline notice to exercise the status-only design safely. Normal preview buttons
+are simulated. The informational Got it response does not falsely satisfy a normal
+Install/Later/close checklist requirement.
+
+CLI status now includes queued awareness, last toast evidence, working-hour policy,
+and saved preparation details. Readiness shows disabled hours, the queue and saved
+preparation information. Refresh is local-only; it does not run a download.
+Preparation status is /Library/Management/PUSH/preparation.json; protected download
+logs are under preparation/. Both are included in the previous-package backup.
+A saved preparation result describes a prior operation, not a new live cache check.
+
+VERIFICATION LIMITS
+Offline checks cover weekend/unrestricted hours, optional restrictions, failed-window
+retry dates, target-scoped queue persistence, safe download argument plans, preparation
+eligibility, dry-run and competing-install guards, old state decoding, configuration
+round-trips and passive saved reporting. Universal Release builds and package contents
+are inspected. The agent has not launched PUSH, performed a real update check,
+downloaded an installer, enrolled/registered a Mac, upgraded macOS, or restarted it.
+Actual visual and unattended download/installation behavior needs your own pilot test.
+
+This is an unsigned local test installer with ad-hoc signed universal binaries for
+macOS 14+, Apple Silicon and Intel. It is not a notarized fleet deployment release.

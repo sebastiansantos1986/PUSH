@@ -1,0 +1,32 @@
+{
+  "adminVersion": "1.1.0",
+  "embeddedClient": "1.9.1",
+  "embeddedJamfCheckIn": "1.1.0",
+  "adminOfflineChecks": 313,
+  "unchangedEngineChecks": 343,
+  "unchangedJamfCheckInChecks": 15,
+  "totalOfflineChecks": 671,
+  "adminArchitectures": "x86_64 arm64",
+  "configuredPackageTests": [
+    {
+      "mode": "paused",
+      "reviewedYAML": "matched payload and manifest hash",
+      "images": "matched where selected",
+      "apps": "PUSH + JamfCheckIn only; signatures verified",
+      "scripts": "syntax checked, retained backups and guarded future activation",
+      "executed": false
+    },
+    {
+      "mode": "monitor",
+      "reviewedYAML": "matched payload and manifest hash",
+      "images": "matched where selected",
+      "apps": "PUSH + JamfCheckIn only; signatures verified",
+      "scripts": "syntax checked, retained backups and guarded future activation",
+      "executed": false
+    }
+  ],
+  "advice": "Rules tested for deadline preservation, dry-run preservation, stable discovery, hourly reminders, working-hour restrictions, support contacts, stale/cached catalog and explicit activation gating",
+  "noLiveActions": "No generated installer, PUSH or JamfCheckIn app, profile installation, live request, monitor activation, upgrade/download, wallpaper change, registration or restart was executed. Packaging tools and offline fixtures only.",
+  "signing": "Ad-hoc signed local binaries, unsigned installers; production signing/notarization and managed pilot remain.",
+  "pilotNeeded": "Native Admin GUI build flow, actual installer behavior on a pilot, MDM profiles, managed authorization and scheduled checks/reboot behavior."
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sebastianitconsulting.jamfcheckin.autocheckin</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/jamf</string>
+        <string>policy</string>
+    </array>
+    <!-- Every 3 hours (10800 seconds). Runs as root, so no password prompt. -->
+    <key>StartInterval</key>
+    <integer>10800</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/jamfcheckin-autocheckin.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/jamfcheckin-autocheckin.log</string>
+</dict>
+</plist>

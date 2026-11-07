@@ -37,11 +37,22 @@ struct StatusCommand {
         cliDivider()
         cliInfo("Used:",              "\(state.deferralCount) / \(maxDef)")
         cliInfo("Last seen target:",  state.lastSeenVersion.isEmpty ? "(none)" : state.lastSeenVersion)
+        cliInfo("Awareness queued:", state.notificationPendingSince == nil ? "No":"Yes — waiting for an eligible desktop session")
+        cliInfo("Last toast shown:", state.lastToastShownAt.map {ISO8601DateFormatter().string(from:$0)} ?? "Not recorded")
         cliInfo("Next toast:",        describeDate(state.nextToastDate))
         cliInfo("Next nudge:",        describeDate(state.nextNudgeDate))
         cliInfo("Install started:",   state.installStarted   ? "Yes" : "No")
         cliInfo("Install completed:", state.installCompleted ? "Yes" : "No")
 
+        if let data=FileManager.default.contents(atPath:managedBase+"/preparation.json"),let preparation=try? JSONDecoder().decode(PreparationState.self,from:data) {
+            cliInfo("Last preparation:",preparation.target+" · "+preparation.phase)
+            cliInfo("Preparation detail:",preparation.reason)
+        }
+        if let recovery=try? InstallRecoveryStore.load() {
+            cliInfo("Recovery phase:",recovery.phase)
+            cliInfo("Previous issue:",recovery.reason)
+            cliInfo("Saved retry time:",recovery.retryAt.map{ISO8601DateFormatter().string(from:$0)} ?? "Not scheduled")
+        }
         if let c = config {
             cliSection("Config")
             cliDivider()
@@ -57,7 +68,9 @@ struct StatusCommand {
             cliInfo("Nudge interval:",  "\(formatInterval(Int(c.nudgeIntervalSeconds))) (every \(c.update.nudgeIntervalSeconds)s)")
             cliInfo("Hard block mode:", c.ui.hardBlockFullscreen ? "Fullscreen lockout" : "Standard popup")
             cliInfo("Auto install after deadline:", c.update.autoInstallAfterDeadline ? "✅ Enabled — forces install when deadline passes" : "Disabled — hard block only")
-            cliInfo("Alert window:",    "\(c.schedule.alertStartHour):00–\(c.schedule.alertEndHour):00\(c.schedule.skipWeekends ? " (weekdays only)" : "")")
+            cliInfo("Compliance wallpaper:", c.compliance.wallpaperEnabled ? "Enabled — rechecked each macOS run":"Disabled")
+            cliInfo("Alert window:", c.schedule.respectAlertWindow ? "\(c.schedule.alertStartHour):00–\(c.schedule.alertEndHour):00\(c.schedule.skipWeekends ? " (weekdays only)" : "")" : "Disabled — reminders allowed 24/7")
+            cliInfo("Logged-out preparation:", c.update.prepareAtDeadlineWhenLoggedOut ? "Download only at deadline; notify after login":"Disabled")
             cliInfo("Skip meetings:",    c.schedule.skipDuringMeetings ? "Yes" : "No")
             cliInfo("DDM detection:",   c.ddm.enabled ? "Enabled" : "Disabled")
             cliInfo("Auto-check:",      c.auto.enabled ? "Enabled" : "Disabled")

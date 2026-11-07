@@ -9,7 +9,7 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/push-admin-tests.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 sources=()
 for source in Sources/*.swift; do
-    [[ "$source" == Sources/AdminApp.swift || "$source" == Sources/SmartSetup.swift || "$source" == Sources/AppsPage.swift || "$source" == Sources/ReadinessPage.swift || "$source" == Sources/EntraPage.swift ]] || sources+=("$source")
+    [[ "$source" == Sources/AdminApp.swift || "$source" == Sources/SetupAdvisorCard.swift || "$source" == Sources/DeploymentExportPage.swift || "$source" == Sources/SmartSetup.swift || "$source" == Sources/AppsPage.swift || "$source" == Sources/RecoverySettingsPage.swift || "$source" == Sources/WallpaperPage.swift || "$source" == Sources/NotificationHistoryPage.swift || "$source" == Sources/SetupWizardPage.swift || "$source" == Sources/ReadinessPage.swift || "$source" == Sources/EntraPage.swift ]] || sources+=("$source")
 done
 compiler_flags=()
 if [[ "${PUSH_MACRO_SANDBOX_WORKAROUND:-0}" == 1 ]]; then compiler_flags=(-Xfrontend -disable-sandbox); fi

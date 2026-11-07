@@ -1,3 +1,12 @@
+Current release: engine 1.8.0 / Admin 0.8.0. Developer: Sebastian Santos. See WALLPAPER-AND-HISTORY.txt for delivery history, opt-in continuous wallpaper enforcement, custom image deployment and wallpaper-only testing. Earlier release notes below are historical.
+
+Current release: PUSH engine 1.7.0 / Admin 0.7.0. Developer: Sebastian Santos. See AROUND-THE-CLOCK.txt for optional working hours (disabled by default), queued awareness and download-only deadline preparation. Earlier release notes below are historical.
+
+Current release: PUSH Admin 0.6.0 / engine 1.6.0.
+Developer: Sebastian Santos
+See GUIDED-SETUP.txt for the seven-step wizard, safe previews, local progress, and deployment review. READINESS.txt describes the retained readiness dashboard.
+The notes below describe historical releases; current package instructions are in GUIDED-SETUP.txt.
+
 Toast response and design update — November 5, 2026
 Developer: Sebastian Santos
 Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS

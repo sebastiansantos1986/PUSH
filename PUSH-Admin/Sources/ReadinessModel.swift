@@ -72,7 +72,9 @@ struct MonitorReadiness {
 struct DashboardHours {
     let start: Int, end: Int
     let weekdays: Bool
+    var restricted = true
     func nextAllowed(_ candidate: Date, calendar: Calendar = .current) -> Date? {
+        if !restricted {return candidate}
         guard (0...23).contains(start),(1...24).contains(end),start < end else { return nil }
         var date = candidate
         for _ in 0..<9 {
@@ -97,7 +99,7 @@ struct InstalledPolicySummary {
     init(_ config: DashboardConfig) {
         macEnabled=config.auto.enabled;appsEnabled=config.apps.enabled;entraEnabled=config.entra.enabled;dryRun=config.debug.dryRun
         target=config.update.targetVersion;deadline=ISO8601DateFormatter().date(from:config.effectiveDeadline);tracking=config.auto.trackLatest
-        macHours = .init(start:config.schedule.alertStartHour,end:config.schedule.alertEndHour,weekdays:config.schedule.skipWeekends)
+        macHours = .init(start:config.schedule.alertStartHour,end:config.schedule.alertEndHour,weekdays:config.schedule.skipWeekends,restricted:config.schedule.respectAlertWindow)
         entraHours = .init(start:config.entra.startHour,end:config.entra.endHour,weekdays:config.entra.weekdaysOnly)
         approved=AppUpdatePolicy.ids(config.apps.approved);autoClosed=config.apps.autoUpdateClosed;appReminders=config.apps.notifyHourly;providerPath=config.apps.installomatorPath
     }
@@ -106,7 +108,9 @@ struct DashboardOSState: Decodable {
     var nextToastDate: Date?, nextNudgeDate: Date?, lastDiscoveryDate: Date?
     var installStarted: Bool?, installCompleted: Bool?
     var lastDiscoveryError: String?
+    var notificationPendingSince: Date?
 }
+struct DashboardPreparationState: Decodable {var target:String;var phase:String;var reason:String;var checkedAt:Date}
 struct DashboardAppState: Decodable {
     struct Record: Decodable { var installed: String?;var target: String?;var result: String?;var checked: Date?;var deadline: Date? }
     var apps: [String:Record]
@@ -139,6 +143,7 @@ struct ReadinessSnapshot {
     var scheduled: [String:ObservedHealth]
     var manual: [String:ObservedHealth]
     var providerPresent: Bool
+    var preparation: DashboardPreparationState? = nil
     var calendar = Calendar.current
     static func stamp(_ date: Date?) -> String { date.map { $0.formatted(date:.abbreviated,time:.shortened) } ?? "Not recorded" }
     var headline: String {
@@ -185,6 +190,11 @@ struct ReadinessSnapshot {
         let now=capturedAt
         let toast = (os?.nextToastDate).flatMap {p.macHours.nextAllowed(max(now,$0),calendar:calendar)}
         mac.facts=[.init(label:"Running macOS",value:runningOS),.init(label:"Saved target",value:p.target.isEmpty ? "Not selected":p.target),.init(label:"Deadline",value:Self.stamp(p.deadline)),.init(label:"Toast eligible",value:Self.stamp(toast)),.init(label:"Next full prompt",value:Self.stamp(os?.nextNudgeDate)),.init(label:"Monitor",value:mainMonitor.title)]
+        mac.facts += [.init(label:"Working-hour restriction",value:p.macHours.restricted ? "Enabled":"Disabled · 24/7"),.init(label:"Awareness queued",value:os?.notificationPendingSince == nil ? "No saved queued notice":"Yes · desktop session required")]
+        if let preparation {
+            mac.facts.append(.init(label:"Last background preparation",value:preparation.target+" · "+preparation.phase))
+            mac.observation=(mac.observation.map{$0+"\n"} ?? "")+"Saved download-only preparation · "+Self.stamp(preparation.checkedAt)+": "+preparation.reason
+        }
         mac.nextStep="Copy Check now to refresh discovery, or review the update policy."
         if !p.macEnabled { mac.status="Disabled by policy";mac.reason="Automatic macOS checks are disabled in the installed configuration.";mac.tone = .inactive }
         else if p.dryRun { mac.status="Dry run";mac.reason="Live update checks and reminders are disabled by dry-run mode.";mac.tone = .inactive }

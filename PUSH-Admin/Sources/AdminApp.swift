@@ -6,10 +6,10 @@ import AppKit
 import Combine
 
 enum AdminPage: String, CaseIterable, Identifiable {
-    case readiness = "Readiness", overview = "Overview", catalog = "macOS Releases", configuration = "Configuration", apps = "App Updates", entra = "Entra Registration", studio = "Popup Studio", deployment = "Deployment"
+    case recovery = "User Status & Recovery", history = "Delivery History", wallpaper = "Wallpaper", setup = "Guided Setup", readiness = "Readiness", overview = "Overview", catalog = "macOS Releases", configuration = "Configuration", apps = "App Updates", entra = "Entra Registration", studio = "Popup Studio", deployment = "Deployment"
     var id: String { rawValue }
     var icon: String {
-        switch self { case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
+        switch self { case .recovery:return "arrow.clockwise.circle"; case .history:return "clock.arrow.circlepath"; case .wallpaper:return "photo"; case .setup:return "wand.and.stars"; case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
     }
 }
 @main
@@ -19,7 +19,7 @@ struct PUSHAdminApp: App {
         WindowGroup("PUSH Admin") { AdminRoot().environmentObject(store).frame(minWidth:1100,minHeight:780) }
             .defaultSize(width:1250,height:900)
         Settings { VStack(alignment:.leading,spacing:12) {
-            Text("PUSH Admin").font(.title2.bold()); Text("Version 0.5.0 · Developer: Sebastian Santos")
+            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.1.0 · Developer: Sebastian Santos")
             Text("Mist checks run at launch and when you refresh. They list stable installers compatible with this Mac; they never download an installer.")
             Link("mist-cli project",destination:URL(string:"https://github.com/ninxsoft/mist-cli")!)
         }.padding(28).frame(width:500) }
@@ -66,7 +66,7 @@ struct AdminRoot: View {
             Divider()
             VStack(alignment: .leading, spacing: 5) {
                 Label("User password prompts disabled", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
-                Text("Sebastian Santos · v0.5.0").font(.caption2).foregroundStyle(.tertiary)
+                Text("Sebastian Santos · v1.1.0").font(.caption2).foregroundStyle(.tertiary)
             }.padding(18)
         }.background(Color(NSColor.controlBackgroundColor))
     }
@@ -83,6 +83,10 @@ struct AdminRoot: View {
             Divider()
             Group {
                 switch page {
+                case .recovery: RecoverySettingsPage()
+                case .history: NotificationHistoryPage(navigate: {page = $0})
+                case .wallpaper: WallpaperPage(navigate: {page = $0})
+                case .setup: SetupWizardPage(navigate: { page = $0 })
                 case .readiness: ReadinessPage(navigate: { page = $0 })
                 case .overview: OverviewPage(navigate: { page = $0 })
                 case .catalog: CatalogPage()
@@ -135,6 +139,7 @@ struct OverviewPage: View {
     var body: some View {
         ScrollView { VStack(alignment:.leading,spacing:24) {
             PageHeading(eyebrow:"Welcome to PUSH Admin",title:"One place to set up PUSH.",subtitle:"Discover macOS releases, shape your policy, and see exactly what users will see.")
+            Button("Open guided setup") {navigate(.setup)}.buttonStyle(.borderedProminent)
             HStack(alignment:.top,spacing:16) {
                 MetricCard(icon:"desktopcomputer",title:"Installed PUSH",value:store.pushVersion,detail:store.pushInstalled ? "Engine detected on this Mac" : "Companion works without enrollment")
                 MetricCard(icon:"globe",title:store.catalogIsCached ? "Latest cached release" : "Latest compatible release",value:store.releases.first?.version ?? (store.isRefreshing ? "Checking…" : "Unavailable"),detail:store.lastChecked.map {"Checked " + $0.formatted(date:.abbreviated,time:.shortened)} ?? "Checks automatically when this app opens")
@@ -264,7 +269,7 @@ struct PopupStudioPage: View {
     @State private var deferrals = 1
     @State private var revision = UUID()
     @State private var showLogoControls = false
-    let states: [UIState] = [.softNudge, .hardBlock, .toast, .appUpdates, .entraRegistration, .downloading, .installing, .rebootNudge, .rebootForce, .rebooting, .preflightPower, .preflightDisk, .compliant, .error]
+    let states: [UIState] = [.updateRecovery, .softNudge, .hardBlock, .toast, .appUpdates, .entraRegistration, .downloading, .installing, .rebootNudge, .rebootForce, .rebooting, .preflightPower, .preflightDisk, .compliant, .error]
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             PageHeading(eyebrow: "Popup Studio", title: "See it before you deploy it.", subtitle: "Choose a popup below. Click its icon to add an image directly to the preview. Buttons are simulated.")
@@ -329,13 +334,16 @@ struct StudioPreview: View {
     @State private var measuredHeight: CGFloat = 720
     let logoData: Data?
     let chooseLogo: () -> Void
-    init(state: UIState, yaml: String, progress: Double, deferrals: Int, logoData: Data?, chooseLogo: @escaping () -> Void, appNotices: [AppUpdateNotice]? = nil, entraNotice: EntraNotice? = nil) {
+    init(state: UIState, yaml: String, progress: Double, deferrals: Int, logoData: Data?, chooseLogo: @escaping () -> Void, appNotices: [AppUpdateNotice]? = nil, entraNotice: EntraNotice? = nil, informationalToastMessage: String? = nil, recoveryNotice: RecoveryNotice? = nil) {
         self.logoData = logoData
         self.chooseLogo = chooseLogo
         var config = UIConfig.fromAdminYAML(yaml)
         config.ui.popupWidth = min(900, max(420, config.ui.popupWidth))
         config.toast.width = min(700, max(300, config.toast.width))
+        if informationalToastMessage != nil {config.toast.autoDismissSeconds=30;config.toast.showCloseButton=true}
         let context = UIContext(config: config, state: state, deferralCount: deferrals)
+        context.informationalToastMessage=informationalToastMessage
+        context.recoveryNotice=recoveryNotice ?? RecoveryNotice.preview()
         if let entraNotice { context.entraNotice = entraNotice }
         if let appNotices { context.appUpdates = appNotices }
         context.downloadProgress = progress
@@ -387,12 +395,13 @@ struct StudioPreview: View {
                 LinearGradient(colors:[Color.blue.opacity(0.15),Color.purple.opacity(0.12),Color.orange.opacity(0.09)],startPoint:.topLeading,endPoint:.bottomTrailing)
             }
         }
-        .onAppear { ctx.onPreviewAction = { state, action, code, automatic in store.recordButtonCheck(state:state,action:action,code:code,automatic:automatic) } }
+        .onAppear { ctx.onPreviewAction = { state, action, code, automatic in if ctx.informationalToastMessage == nil {store.recordButtonCheck(state:state,action:action,code:code,automatic:automatic)} } }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.08)))
     }
     @ViewBuilder private var popup: some View {
         switch ctx.state {
+        case .updateRecovery: UpdateRecoveryView()
         case .softNudge: SoftNudgeView()
         case .hardBlock: HardBlockView()
         case .toast: ToastView()
@@ -417,6 +426,8 @@ struct DeploymentPage:View {
         ScrollView{VStack(alignment:.leading,spacing:24){
             PageHeading(eyebrow:"Deployment",title:"From draft to managed policy.",subtitle:"Export for your fleet, or apply to a test Mac first. This companion never starts a macOS installer.")
             ValidationSummary()
+            SetupAdvisorCard()
+            DeploymentExportCard()
             AdminCard {
                 Label("1 · Export for Jamf or another deployment tool",systemImage:"square.and.arrow.up").font(.headline)
                 Text("Save config.yaml with your complete policy. Existing unknown settings are preserved; known plaintext credential values are excluded. Distribute the file to /Library/Management/PUSH/config.yaml using your normal management workflow.").font(.callout).foregroundStyle(.secondary)
@@ -429,7 +440,7 @@ struct DeploymentPage:View {
             }
             AdminCard {
                 Label("3 · Enable automatic monitoring",systemImage:"calendar.badge.clock").font(.headline)
-                Text("Enable hourly checks after applying your policy. Dry-run policies only log; live policies can notify users and install according to your settings. The first check runs immediately.").font(.callout).foregroundStyle(.secondary)
+                Text("Check every five minutes after applying your policy; toast timing remains hourly. Dry-run policies only log; live policies can notify users and install according to your settings. The first check runs immediately.").font(.callout).foregroundStyle(.secondary)
                 Label(store.schedulePresent ? "Schedule definition is installed" : "No schedule definition found",systemImage:store.schedulePresent ? "clock.badge.checkmark":"pause.circle").font(.callout)
                 HStack{Button("Enable monitoring…"){store.changeSchedule(enable:true)}.disabled(!store.pushInstalled);Button("Pause schedule…"){store.changeSchedule(enable:false)}.disabled(!store.pushInstalled)}
             }

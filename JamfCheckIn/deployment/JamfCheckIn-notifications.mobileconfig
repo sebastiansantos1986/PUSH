@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>NotificationSettings</key>
+            <array>
+                <dict>
+                    <key>BundleIdentifier</key>
+                    <string>com.sebastianitconsulting.jamfcheckin</string>
+                    <key>NotificationsEnabled</key>
+                    <true/>
+                    <!-- AlertType: 0 = None, 1 = Temporary (banner), 2 = Persistent (alert) -->
+                    <key>AlertType</key>
+                    <integer>1</integer>
+                    <key>BadgesEnabled</key>
+                    <true/>
+                    <key>SoundsEnabled</key>
+                    <true/>
+                    <key>ShowInNotificationCenter</key>
+                    <true/>
+                    <key>ShowInLockScreen</key>
+                    <true/>
+                </dict>
+            </array>
+            <key>PayloadType</key>
+            <string>com.apple.notificationsettings</string>
+            <key>PayloadIdentifier</key>
+            <string>com.sebastianitconsulting.jamfcheckin.notifications</string>
+            <key>PayloadUUID</key>
+            <string>CD00AD1D-F8F1-4AAC-A53C-661BA49FE395</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+            <key>PayloadDisplayName</key>
+            <string>JamfCheckIn Notifications</string>
+        </dict>
+    </array>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadIdentifier</key>
+    <string>com.sebastianitconsulting.jamfcheckin.notifications.profile</string>
+    <key>PayloadUUID</key>
+    <string>A3051AFD-7202-4488-BC5C-7FFE668DBBBB</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>PayloadDisplayName</key>
+    <string>JamfCheckIn Notifications</string>
+    <key>PayloadDescription</key>
+    <string>Pre-authorizes notifications for the JamfCheckIn menu bar app.</string>
+    <key>PayloadScope</key>
+    <string>System</string>
+</dict>
+</plist>

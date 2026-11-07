@@ -1,0 +1,97 @@
+PUSH Guided Setup — PUSH Admin 0.6.0 / engine 1.6.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+INSTALL AND OPEN IT YOURSELF
+1. Quit PUSH Admin and allow active PUSH commands to finish.
+2. Install PUSH-Guided-Setup-0.6.0.pkg (the combined local test package).
+3. Open /Applications/PUSH Admin.app.
+4. Select Guided Setup in the sidebar, or use Guided setup from Readiness.
+
+The engine remains version 1.6.0; this release adds the companion wizard.
+The combined installer backs up existing files and pauses both monitoring services.
+It preserves installed configuration, state and Keychain credentials. It does not
+launch either app, query update catalogs, register this Mac, update apps, install
+macOS, or restart. This is an unsigned local test package with ad-hoc signed
+universal binaries for macOS 14+, Apple Silicon and Intel.
+
+The separate PUSH-Admin-0.6.0.pkg updates only the companion. It has no installer
+scripts and does not pause or change an existing engine's monitoring state.
+Use the combined package when you want both components with monitoring paused.
+
+SEVEN STEPS
+Start: Continue the saved draft, create a new dry-run draft, or deliberately replace
+it by importing YAML. Import installed YAML reads the existing file; it does not
+apply anything. Known plaintext credential values are omitted.
+
+Branding: Set organization/support details, pick the default logo, a symbol or a
+custom image, and choose accent/background appearance. The image appears directly
+in the preview. Attached PNG assets can be exported/applied with the draft.
+
+macOS: Leave checks disabled, follow updates within the current major, allow
+compatible major upgrades, or configure a fixed target. Tracking presets preserve
+explicit deadline overrides, hours, authorization references and enforcement choices.
+Set toast interval (3600 seconds is hourly), hours, grace days and deadline behavior.
+An explicit YAML deadline always overrides generated target-specific deadlines.
+Review old expired overrides rather than assuming discovery replaces them.
+
+Apps: Explicitly approve Chrome stable, Firefox release and/or VS Code stable.
+Choose grouped reminders and whether closed apps can update automatically.
+Actual installation requires a separately managed trusted Installomator provider.
+Open apps are not force-quit. Existing per-app deadlines are preserved.
+
+Registration: Configure the supported legacy Jamf Self Service policy ID, hours
+and paths. Production nudges require an enrolled Mac and supported dependencies.
+An unenrolled Mac remains Not applicable. Local evidence is not cloud compliance.
+
+Preview: Choose a popup and click Show simulated preview. Exercise Install, Later,
+Close and the confirmed reminder scheduler where available. The buttons use the
+existing preview-only context. No engine command, Self Service, update or restart
+is invoked. You can preview all four registration stages without enrollment.
+
+Review: See draft validation, rehearsal/live mode, deadline overrides, automatic
+installation choices, preserved restart/full-screen choices, local monitor facts,
+provider-file presence, and unverified authorization. Export YAML or continue to
+Deployment for the existing explicit apply/monitor controls. The wizard does not
+apply a draft or activate a monitor. A valid draft is not installation readiness.
+
+PREVIEW EVIDENCE AND RESUME
+The wizard resumes its step and draft on later visits. Progress is stored separately
+from configuration under your user Application Support/PUSH Admin directory.
+setup-progress.json stores a bounded set of action codes, timestamps and draft
+hashes, not the YAML, logo image or account credentials.
+
+Suggested button choices are counted only for the exact current draft, including
+attached image content. Editing any setting or switching dry-run/live mode makes
+old evidence inapplicable to the new draft. Automatic timeout events, opening a
+scheduler without confirming it, failure codes and unknown states do not certify a
+button click. Hidden deferral/close buttons are not required by the checklist.
+
+Mark draft reviewed records only your review of the exact valid draft. It does not
+claim previews are complete, configuration has been applied, or installation is
+authorized. Outstanding preview choices and IT prerequisites remain visible.
+Leaving the wizard does not apply or activate anything; the draft is saved locally.
+
+READINESS AND LIVE ACTIVATION
+Readiness Refresh remains passive: installed local files and the two known service
+states only. The wizard's local refresh uses that same reader. Provider-file presence
+is not a trust verdict; the engine verifies protected ownership/path and app identity.
+The wizard does not query Keychain, detect live enrollment or certify authorization.
+
+Admin still lists Mist's compatible installer catalog at launch, as before. That
+catalog listing is separate from the wizard/readiness local refresh and does not
+download installers. This build was not launched by the agent for visual testing.
+
+In Deployment, applying a live policy while monitors are active changes what their
+next checks use. Enabling monitoring can run immediately and follow preserved
+install-after-deadline/closed-app policies. Review before choosing those actions.
+End-user password-prompt fallback remains disabled; managed authorization is an
+IT provisioning task. No user's password is collected by the wizard.
+
+SOURCE AND OFFLINE CHECKS
+The native interface was typechecked and built for both architectures. Companion
+offline checks exercise strategy preservation, field validation, preview-evidence
+identity, resume data, bounded history and honest readiness reporting, along with
+existing configuration/preview/readiness regressions. Actual UI appearance, clicking
+and managed-device integration still need your own test run. No app, installer,
+real update check, registration, upgrade or restart is run by the agent.

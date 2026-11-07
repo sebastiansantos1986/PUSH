@@ -10,7 +10,8 @@ packaging="$(cd "$(dirname "$0")" && pwd)"
 stage="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/push-package.XXXXXX")"
 trap '/bin/rm -rf "$stage"' EXIT
 base="$stage/payload/Library/Management/PUSH"
-/bin/mkdir -p "$base/Local-Test"
+/bin/mkdir -p "$base/Local-Test" "$base/assets/wallpapers"
+/bin/cp "$packaging/resources/PUSH-NonCompliant.png" "$base/assets/wallpapers/PUSH-NonCompliant.png"
 [[ -x "$products/push-cli" && -x "$products/push-ui.app/Contents/MacOS/push-ui" ]] || exit 1
 /usr/bin/ditto "$products/push-cli" "$base/push-cli"
 /usr/bin/ditto "$products/push-ui.app" "$base/push-ui.app"
@@ -22,16 +23,18 @@ base="$stage/payload/Library/Management/PUSH"
 /usr/bin/codesign --force --sign - --timestamp=none "$base/push-ui.app"
 /usr/bin/codesign --verify --strict "$base/push-cli"
 /usr/bin/codesign --verify --deep --strict "$base/push-ui.app"
+printf '{"version":1,"minimumClient":"1.9.1"}\n' > "$base/user-request-protocol.json"
+
 /usr/bin/pkgbuild --analyze --root "$stage/payload" "$stage/components.plist"
 /usr/bin/plutil -replace 0.BundleIsRelocatable -bool NO "$stage/components.plist"
 /usr/bin/plutil -replace 0.BundleIsVersionChecked -bool NO "$stage/components.plist"
 /usr/bin/pkgbuild --root "$stage/payload" --component-plist "$stage/components.plist" \
     --scripts "$packaging/scripts" --ownership recommended \
-    --identifier com.push.pkg --version 1.6.0 --install-location / "$stage/push-component.pkg"
+    --identifier com.push.pkg --version 1.9.1 --install-location / "$stage/push-component.pkg"
 cat > "$stage/Distribution.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-<title>PUSH 1.6.0 — Local Test</title>
+<title>PUSH 1.9.1 — Local Test</title>
 <organization>com.push</organization>
 <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
 <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
@@ -39,7 +42,7 @@ cat > "$stage/Distribution.xml" <<'XML'
 <welcome file="welcome.html" mime-type="text/html"/>
 <choices-outline><line choice="push"/></choices-outline>
 <choice id="push" visible="false"><pkg-ref id="com.push.pkg"/></choice>
-<pkg-ref id="com.push.pkg" version="1.6.0" onConclusion="none">push-component.pkg</pkg-ref>
+<pkg-ref id="com.push.pkg" version="1.9.1" onConclusion="none">push-component.pkg</pkg-ref>
 </installer-gui-script>
 XML
 /usr/bin/productbuild --distribution "$stage/Distribution.xml" --resources "$packaging/resources" \

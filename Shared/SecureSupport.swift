@@ -213,6 +213,7 @@ func popupResultMessage(state: String, exitCode: Int32) -> String {
     case 4: return "Power check timed out"
     case 5: return state == "toast" ? "Toast auto-dismissed" : "Popup failed (unexpected timeout response for \(state))"
     case 6: return state == "entraRegistration" ? "User chose Contact IT" : "Support contact opened"
+    case 7: return state == "updateRecovery" ? "Recovery countdown elapsed; no user choice was recorded" : "Popup failed (unexpected automatic-retry response)"
     case 100: return "Popup timed out without a user response"
     case 101: return "No logged-in user is available for the popup"
     case 103: return "Popup could not display a window. No user choice was recorded. See push-cli log show for launch diagnostics."

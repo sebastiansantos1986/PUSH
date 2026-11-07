@@ -15,7 +15,7 @@ for name in startosinstall softwareupdate mist; do
         exit 1
     fi
 done
-for directory in /Library/Management "$base"; do
+for directory in /Library/Management "$base" "$base/assets" "$base/assets/wallpapers" /Library/LaunchAgents; do
     if [[ -e "$directory" || -L "$directory" ]]; then
         [[ -d "$directory" && ! -L "$directory" && "$(/usr/bin/stat -f %u "$directory")" == 0 ]] || {
             echo "Unsafe installation directory: $directory" >&2; exit 1;
@@ -41,7 +41,7 @@ fi
 /bin/chmod 700 "$backup_root"
 backup="$backup_root/$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
 /bin/mkdir "$backup"
-for item in push-cli push-ui.app config.yaml config.json state.json detections.json apps-state.json entra-state.json health; do
+for item in push-cli push-ui.app "PUSH Status.app" config.yaml config.json state.json detections.json apps-state.json entra-state.json preparation.json preparation notification-history.json install-recovery.json user-request-result.json assets health; do
     if [[ -e "$base/$item" || -L "$base/$item" ]]; then
         /usr/bin/ditto "$base/$item" "$backup/$item"
     fi
@@ -53,12 +53,27 @@ if [[ -e "$entra_plist" || -L "$entra_plist" ]]; then
     /bin/cp -p "$entra_plist" "$backup/com.push.entra-registration.plist"
     /bin/rm "$entra_plist"
 fi
+if [[ -e /Library/LaunchAgents/com.push.status.plist || -L /Library/LaunchAgents/com.push.status.plist ]]; then
+    /bin/cp -Pp /Library/LaunchAgents/com.push.status.plist "$backup/com.push.status.plist"
+fi
+# Retire the superseded standalone menu only after its app/agent are backed up.
+for uid in $(/bin/ps -axo uid=,comm= | /usr/bin/awk '($2 ~ /loginwindow$/ || $2 ~ /JamfCheckIn$/ || $2 ~ /push-status$/) && $1 != 0 {print $1}' | /usr/bin/sort -u); do
+    /bin/launchctl bootout "gui/$uid/com.push.status" 2>/dev/null || true
+done
+if [[ -e /Library/LaunchAgents/com.push.status.plist || -L /Library/LaunchAgents/com.push.status.plist ]]; then
+    /bin/rm /Library/LaunchAgents/com.push.status.plist
+fi
+if [[ -d "$base/PUSH Status.app" && ! -L "$base/PUSH Status.app" ]]; then
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$base/PUSH Status.app/Contents/Info.plist")" == com.push.status ]] || exit 1
+    /bin/rm -rf "$base/PUSH Status.app"
+fi
 if [[ -e /usr/local/bin/push-cli || -L /usr/local/bin/push-cli ]]; then
     /bin/cp -Pp /usr/local/bin/push-cli "$backup/usr-local-bin-push-cli"
 fi
 # Keep the old daemon plist in the backup so a reboot cannot restart it mid-test.
 if [[ -e "$plist" || -L "$plist" ]]; then /bin/rm "$plist"; fi
 /usr/bin/pkill -x push-ui 2>/dev/null || true
+/usr/bin/pkill -x push-status 2>/dev/null || true
 /bin/mkdir -p "$base/logs" "$base/downloads"
 printf '%s\n' "$backup" > "$base/last-package-backup.txt"
 /bin/chmod 600 "$base/last-package-backup.txt"

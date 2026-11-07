@@ -19,6 +19,10 @@ struct ConfigGroup: Identifiable {
     let fields: [ConfigField]
 }
 let configGroups: [ConfigGroup] = [
+    .init(id:"wallpaper",title:"Compliance wallpaper",subtitle:"Reapply the managed image while the Mac is below its configured macOS target.",icon:"photo",fields:[
+        .init("compliance.wallpaperEnabled","Enable compliance wallpaper",.boolean,"false"),
+        .init("compliance.nonCompliantWallpaper","Non-compliant background path",.text,"/Library/Management/PUSH/assets/wallpapers/PUSH-NonCompliant.png"),
+        .init("compliance.compliantWallpaper","Compliant background · blank restores personal image")]),
     .init(id:"entra", title:"Entra registration", subtitle:"Opt-in Jamf registration reminders, separate from cloud compliance.", icon:"person.crop.circle.badge.checkmark", fields:[
         .init("entra.enabled","Enable registration reminders",.boolean,"false"),
         .init("entra.policyID","Self Service registration policy ID",.text,"876"),
@@ -43,6 +47,7 @@ let configGroups: [ConfigGroup] = [
         .init("apps.vscodeDeadline","VS Code deadline override · ISO 8601"),
         .init("apps.installomatorPath","Administrator-owned Installomator script",.text,"/usr/local/Installomator/Installomator.sh")]),
     .init(id:"identity", title:"Organization & appearance", subtitle:"Make messages recognizable to your users.", icon:"building.2", fields:[
+        .init("ui.menuBarEnabled","Show PUSH status in JamfCheckIn",.boolean,"true"),
         .init("ui.appName","Application title",.text,"PUSH — Software Update"), .init("ui.orgName","Organization"),
         .init("ui.itContactEmail","Support email"), .init("ui.itContactPhone","Support phone"), .init("ui.helpURL","Support website"),
         .init("ui.accentColorHex","Accent color",.text,"#0A84FF"), .init("ui.popupWidth","Popup width",.number(420...900),"540"),
@@ -54,10 +59,16 @@ let configGroups: [ConfigGroup] = [
         .init("update.targetVersion","Required macOS version",.text,"","Use a full version such as 27.0. Selecting a catalog release fills this field."),
         .init("update.macOSName","macOS display name",.text,"macOS"), .init("update.releaseType","Update type",.choice(["minor","major"]),"minor"),
         .init("update.deadline","Deadline (ISO 8601)",.text,"","Overrides the automatic deadline, including for new targets. Clear it to use days from first detection. Example: 2026-12-01T18:00:00Z."),
+        .init("update.deadlineRecoveryEnabled","Enable deadline failure recovery",.boolean,"true"),
+        .init("update.retryCountdownMinutes","Recovery countdown · minutes",.number(1...60),"10"),
+        .init("update.retryBackoffMinutes","Automatic retry spacing · minutes",.number(5...240),"30"),
+        .init("update.maxAutomaticRetriesPerDay","Recovery attempts per rolling 24 hours",.number(0...6),"3"),
+        .init("update.allowUserUpdateRequests","Allow user update requests",.boolean,"true"),
         .init("update.maxDeferrals","Allowed deferrals",.number(0...100),"5"),
         .init("update.toastIntervalSeconds","Toast interval · seconds",.number(60...604800),"3600"),
         .init("update.autoInstallAfterDeadline","Install automatically after deadline",.boolean,"false"),
         .init("update.silentInstallAfterDeadline","Install silently after deadline",.boolean,"false"),
+        .init("update.prepareAtDeadlineWhenLoggedOut","Download at deadline while logged out",.boolean,"true"),
         .init("update.forceRestartAfterInstall","Request restart after installation",.boolean,"false")]),
     .init(id:"detection", title:"Automatic detection", subtitle:"Discovery and enforcement are separate from checking the catalog in this app.", icon:"sparkle.magnifyingglass", fields:[
         .init("auto.enabled","Enable PUSH auto-check policy",.boolean,"false"),
@@ -73,6 +84,7 @@ let configGroups: [ConfigGroup] = [
         .init("auto.autoInstallNonSystemUpdates","Install non-system updates automatically",.boolean,"false"),
         .init("ddm.enabled","Step aside when DDM manages the update",.boolean,"true")]),
     .init(id:"schedule", title:"Hours & interruptions", subtitle:"Respect working hours, calls, and screen sharing.", icon:"calendar.badge.clock", fields:[
+        .init("schedule.respectAlertWindow","Restrict reminders to working hours",.boolean,"false"),
         .init("schedule.alertStartHour","Start hour · local time",.number(0...23),"8"),
         .init("schedule.alertEndHour","End hour · local time",.number(1...24),"18"),
         .init("schedule.skipWeekends","Skip weekends",.boolean,"true"),
@@ -111,7 +123,7 @@ let configGroups: [ConfigGroup] = [
         .init("toast.showCloseButton","Show close button",.boolean,"true"), .init("toast.showDeferButton","Show Later button",.boolean,"true"),
         .init("toast.soundName","System sound · empty is silent",.text,""),
         .init("toast.installButtonLabel","Install button",.text,"Install Now"), .init("toast.deferButtonLabel","Defer button",.text,"Later")]),
-    .init(id:"management", title:"Management & authorization", subtitle:"Configure IT-managed authorization. End-user passwords stay disabled in PUSH 1.2.1.", icon:"key.horizontal", fields:[
+    .init(id:"management", title:"Management & authorization", subtitle:"Configure IT-managed authorization. End-user password prompts remain disabled.", icon:"key.horizontal", fields:[
         .init("auth.localAccount","Managed local admin account"), .init("jamf.url","Jamf Pro URL"),
         .init("jamf.clientId","Jamf API client ID"), .init("jamf.reportEAAfterCheck","Report compliance to Jamf",.boolean,"false"),
         .init("jamf.eaName","Extension attribute",.text,"OS Update Compliance"),
@@ -129,6 +141,7 @@ struct ConfigDocument: Codable {
     var edits: [String:String] = [:]
     var sourceName = "New configuration"
     var logoImageData: Data? = nil
+    var wallpaperAssets: [String:WallpaperAssetReference]? = nil
     var logoImageName: String? = nil
     var omittedCredentials = 0
     var formatIssues: [String] = []
@@ -274,6 +287,10 @@ struct ConfigDocument: Codable {
         if color.range(of:"^#[0-9a-fA-F]{6}$",options:.regularExpression) == nil { errors.append("Accent color must be a six-digit hex color, such as #0A84FF.") }
         for id in ["jamf.url","ui.helpURL","preflight.diskSpaceLearnMoreURL"] {
             if let v = value(id), !v.isEmpty, URL(string:v)?.scheme != "https" { errors.append("\(id): use an HTTPS address.") }
+        }
+        if value("compliance.wallpaperEnabled") == "true" && value("auto.enabled") != "true" {errors.append("Enable automatic macOS checks before using compliance wallpaper.")}
+        for key in ["compliance.nonCompliantWallpaper","compliance.compliantWallpaper"] {
+            if let path=value(key),!path.isEmpty,!path.hasPrefix("/Library/Management/PUSH/") {errors.append("Wallpaper paths must be inside /Library/Management/PUSH. Use Wallpaper to stage a custom image.")}
         }
         return errors
     }

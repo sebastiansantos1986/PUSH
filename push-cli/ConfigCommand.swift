@@ -131,6 +131,17 @@ struct ConfigCommand {
         case "preflight.minBatteryPercent":       return "\(config.preflight.minBatteryPercent)"
         case "preflight.checkNetworkReachability":return "\(config.preflight.checkNetworkReachability)"
         case "preflight.skipOnVPN":               return "\(config.preflight.skipOnVPN)"
+        case "update.deadlineRecoveryEnabled": return "\(config.update.deadlineRecoveryEnabled)"
+        case "update.retryCountdownMinutes": return "\(config.update.retryCountdownMinutes)"
+        case "update.retryBackoffMinutes": return "\(config.update.retryBackoffMinutes)"
+        case "update.maxAutomaticRetriesPerDay": return "\(config.update.maxAutomaticRetriesPerDay)"
+        case "update.allowUserUpdateRequests": return "\(config.update.allowUserUpdateRequests)"
+        case "ui.menuBarEnabled": return "\(config.ui.menuBarEnabled)"
+        case "compliance.wallpaperEnabled": return "\(config.compliance.wallpaperEnabled)"
+        case "compliance.nonCompliantWallpaper": return config.compliance.nonCompliantWallpaper
+        case "compliance.compliantWallpaper": return config.compliance.compliantWallpaper
+        case "schedule.respectAlertWindow": return "\(config.schedule.respectAlertWindow)"
+        case "update.prepareAtDeadlineWhenLoggedOut": return "\(config.update.prepareAtDeadlineWhenLoggedOut)"
         case "schedule.skipDuringMeetings":       return "\(config.schedule.skipDuringMeetings)"
         case "logging.maxLogSizeMB":              return "\(config.logging.maxLogSizeMB)"
         case "logging.maxRotatedLogs":            return "\(config.logging.maxRotatedLogs)"

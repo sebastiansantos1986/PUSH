@@ -2,11 +2,18 @@
 # Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
 # Only used when no previous config exists. Local verification starts without automation.
 update:
+  deadlineRecoveryEnabled: true
+  retryCountdownMinutes: 10
+  retryBackoffMinutes: 30
+  maxAutomaticRetriesPerDay: 3
+  allowUserUpdateRequests: true
   targetVersion: ""
   deadline: ""  # Explicit ISO 8601 override; blank uses the automatic deadline
+  prepareAtDeadlineWhenLoggedOut: true
   silentInstallAfterDeadline: false
   autoInstallAfterDeadline: false
 ui:
+  menuBarEnabled: true
   appName: "PUSH — Software Update"
 auto:
   enabled: false
@@ -38,3 +45,16 @@ entra:
   weekdaysOnly: true
   skipMeetings: true
   reconOnRegistration: true
+
+# Saved hours are optional; reminders may run on weekends when a user is logged in.
+schedule:
+  respectAlertWindow: false
+  alertStartHour: 8
+  alertEndHour: 18
+  skipWeekends: true
+
+# Visual policy is opt-in; the default image is bundled.
+compliance:
+  wallpaperEnabled: false
+  nonCompliantWallpaper: "/Library/Management/PUSH/assets/wallpapers/PUSH-NonCompliant.png"
+  compliantWallpaper: ""

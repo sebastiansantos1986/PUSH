@@ -17,6 +17,8 @@ import AppKit
 // MARK: - Argument parsing
 
 let args = CommandLine.arguments
+handleWallpaperRequest(args)
+if Bundle.main.bundleIdentifier=="com.push.status" {PushStatusApp.main();Foundation.exit(0)}
 handleCredentialRequest(args)
 
 func argVal(_ flag: String) -> String? {
@@ -81,17 +83,28 @@ var config = FileManager.default.fileExists(atPath: configPath)
 if let style = argVal("--background-style"), ["solid", "frosted"].contains(style) { config.ui.popupBackgroundStyle = style }
 if let raw = argVal("--background-opacity"), let percent = Int(raw) { config.ui.popupOpacityPercent = min(100, max(55, percent)) }
 
+if args.contains("--deadline-notice") || args.contains("--preparation-notice") {
+    config.toast.autoDismissSeconds=30
+    config.toast.showCloseButton=true
+}
 if state == .entraRegistration { config.ui.popupWidth = min(900,max(420,config.ui.popupWidth)) }
 
 let context = UIContext(config: config, state: state,
                         deferralCount: deferralCount, configPath: configPath)
 
+if args.contains("--deadline-notice") {context.informationalToastMessage="The macOS update deadline has passed. PUSH will now attempt the configured update workflow. Please save your work. Dismissing this notice does not postpone enforcement."}
+if args.contains("--preparation-notice") {context.informationalToastMessage="PUSH is downloading your required macOS update in the background. Installation has not started. You will see the next update step after preparation finishes."}
 if let p = argVal("--download-progress") { context.downloadProgress = Double(p) ?? 0 }
 if let s = argVal("--download-subtitle") { context.downloadSubtitle = s }
 if let a = argVal("--disk-available")    { context.diskAvailableGB  = Double(a) ?? 8.5 }
 if let r = argVal("--disk-required")     { context.diskRequiredGB   = Double(r) ?? 25.0 }
 if let e = argVal("--error")             { context.errorMessage     = e }
 context.isManualTest = args.contains("--manual-test")
+if state == .updateRecovery {
+    if let payload=argVal("--recovery-payload"),let notice=RecoveryNotice.decode(payload){context.recoveryNotice=notice}
+    else if context.isManualTest {context.recoveryNotice=RecoveryNotice.preview()}
+    else {Foundation.exit(PushExitCode.error.rawValue)}
+}
 if state == .entraRegistration {
     if let payload = argVal("--entra-payload"), let notice = EntraNotice.decode(payload) { context.entraNotice = notice }
     else if context.isManualTest { context.entraNotice = EntraNotice.preview(stage:Int(argVal("--entra-stage") ?? "1") ?? 1) }
@@ -145,6 +158,7 @@ struct RootView: View {
     var body: some View {
         Group {
             switch ctx.state {
+            case .updateRecovery: UpdateRecoveryView()
             case .toast:          ToastView()
             case .appUpdates:     AppUpdatesToast()
             case .entraRegistration: EntraRegistrationView()

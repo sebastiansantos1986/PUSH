@@ -95,10 +95,13 @@ struct ReadinessReader {
         // available module heartbeat so one healthy module cannot hide another.
         let availableHealth=[policy?.macEnabled == true ? scheduled["macos"]:nil,policy?.appsEnabled == true ? scheduled["apps"]:nil].compactMap{$0}.min{$0.updatedAt < $1.updatedAt}
         let expectedHealth = (policy?.macEnabled == true && scheduled["macos"] == nil) || (policy?.appsEnabled == true && scheduled["apps"] == nil) ? nil : availableHealth
-        let main=monitor("main","com.push.autoupdate",policy?.macEnabled == true || policy?.appsEnabled == true,3600,expectedHealth)
+        let main=monitor("main","com.push.autoupdate",policy?.macEnabled == true || policy?.appsEnabled == true,300,expectedHealth)
         let reg=monitor("entra","com.push.entra-registration",policy?.entraEnabled == true,300,scheduled["entra"])
         let version=Bundle(path:base+"/push-ui.app")?.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "Unknown"
         let osVersion=ProcessInfo.processInfo.operatingSystemVersion
-        return ReadinessSnapshot(capturedAt:now,engineVersion:version,engineInstalled:FileManager.default.isExecutableFile(atPath:base+"/push-cli"),policy:policy,configIssue:configIssue,os:os,osIssue:osIssue,apps:apps,appsIssue:appsIssue,entra:entra,entraIssue:entraIssue,mainMonitor:main,entraMonitor:reg,scheduled:scheduled,manual:manual,providerPresent:FileManager.default.fileExists(atPath:policy?.providerPath ?? ""),runningOS:"\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)")
+        var snapshot = ReadinessSnapshot(capturedAt:now,engineVersion:version,engineInstalled:FileManager.default.isExecutableFile(atPath:base+"/push-cli"),policy:policy,configIssue:configIssue,os:os,osIssue:osIssue,apps:apps,appsIssue:appsIssue,entra:entra,entraIssue:entraIssue,mainMonitor:main,entraMonitor:reg,scheduled:scheduled,manual:manual,providerPresent:FileManager.default.fileExists(atPath:policy?.providerPath ?? ""),runningOS:"\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)")
+        var preparationIssue:String?
+        snapshot.preparation=read("preparation.json",as:DashboardPreparationState.self,issue:&preparationIssue)
+        return snapshot
     }
 }

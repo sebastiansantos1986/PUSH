@@ -13,7 +13,7 @@
 
 import Foundation
 
-let cliVersion = "1.6.0"
+let cliVersion = "1.9.1"
 
 func printHelp() {
     print("""
@@ -44,6 +44,8 @@ func printHelp() {
   Add --dry-run to preview any command without actions
 
 \u{001B}[1mSTATUS\u{001B}[0m
+  wallpaper status        Saved wallpaper policy (no desktop change)
+  wallpaper reconcile     LIVE wallpaper-only enforcement/restoration; no OS upgrade
   status                  Full compliance report
   check                   Exit 0=compliant, 1=needs update, 2=error
   reboot status           Show uptime restart policy and state
@@ -219,6 +221,7 @@ case "auto-check":
     AutoCheckCommand(args: rest).run()
 case "entra": EntraNudgeCommand(args:rest).run()
 case "apps": AppUpdatesCommand(args:rest).run()
+case "wallpaper": WallpaperCommand(args:rest).run()
 case "status":           StatusCommand(args: rest).run()
 case "check":            CheckCommand(args: rest).run()
 case "reboot":           RebootCommand(args: rest).run()

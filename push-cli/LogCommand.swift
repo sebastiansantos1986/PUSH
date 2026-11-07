@@ -73,7 +73,7 @@ struct InstallDaemonCommand {
             cliError("install-daemon requires root. Run: sudo push-cli install-daemon"); exit(1)
         }
 
-        let intervalStr = argValue("--interval", in: args) ?? "1h"
+        let intervalStr = argValue("--interval", in: args) ?? "5m"
         let interval    = parseInterval(intervalStr)
         let binary      = resolvedBinaryPath()
 

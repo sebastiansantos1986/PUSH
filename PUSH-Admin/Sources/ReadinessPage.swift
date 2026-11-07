@@ -32,6 +32,7 @@ struct ReadinessPage: View {
                             Text("Read locally " + ReadinessSnapshot.stamp(snapshot.capturedAt) + " • Engine " + snapshot.engineVersion).font(.caption).foregroundStyle(.secondary)
                             Spacer()
                             Button("Copy summary"){copy(snapshot.summaryText)}
+                            Button("Guided setup"){navigate(.setup)}
                             Button("Review monitoring"){navigate(.deployment)}
                         }
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(.blue.opacity(0.07)).clipShape(RoundedRectangle(cornerRadius:14))

@@ -16,6 +16,7 @@ import SwiftUI
 // MARK: - Popup states
 
 enum UIState: String {
+    case updateRecovery = "updateRecovery"
     case toast          = "toast"
     case appUpdates     = "appUpdates"
     case entraRegistration = "entraRegistration"
@@ -38,6 +39,7 @@ enum UIState: String {
 
     var windowTitle: String {
         switch self {
+        case .updateRecovery: return "Update needs attention"
         case .toast:          return "Software Update"
         case .appUpdates:     return "Application Updates"
         case .entraRegistration: return "Microsoft Entra Registration"
@@ -60,6 +62,7 @@ enum UIState: String {
 // MARK: - Exit codes
 
 enum PushExitCode: Int32 {
+    case automaticRetry  = 7   // Countdown result; never a user Install choice
     case install         = 0   // User clicked Install / power detected / restart confirmed
     case defer_          = 1   // User clicked Remind Me Later (uses 1 deferral)
     case dismiss         = 2   // User dismissed (X / ESC / Skip)
@@ -73,6 +76,8 @@ enum PushExitCode: Int32 {
 // MARK: - Shared runtime context
 
 class UIContext: ObservableObject {
+    var informationalToastMessage: String?
+    var recoveryNotice=RecoveryNotice.preview()
     let isPreview = false
     var isManualTest = false
     let config:        UIConfig

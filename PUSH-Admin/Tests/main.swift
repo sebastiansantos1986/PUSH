@@ -1,6 +1,7 @@
 // PUSH Admin — Developer: Sebastian Santos
 // Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
 import Foundation
+import AppKit
 // Stand-in for the engine's I/O error enum; engine configuration parsing is real.
 enum CLIError: Error {case configNotFound}
 var checks = 0
@@ -278,5 +279,329 @@ check(readinessMonitor(loadedService,true,nil,heartbeat).title == "Check time ne
 var noHistory=reader.load();noHistory.os=nil;noHistory.osIssue=nil;noHistory.runningOS="27.0";noHistory.policy?.target="27.2"
 check(noHistory.modules[0].status == "Not checked", "missing macOS history does not become a due-toast claim")
 check(noHistory.modules[0].facts.first{$0.label == "Toast eligible"}?.value == "Not recorded", "absent toast date is not invented")
+
+// Guided setup policy tests: no UI, system query, Keychain or live action.
+var setupDraft=ConfigDocument.fresh
+check(setupDraft.setupIssues.isEmpty,"fresh setup draft passes wizard validation")
+check(setupDraft.setupFlag("debug.dryRun") && setupDraft.setupStrategy == .disabled,"wizard preserves safe starting mode")
+check(!setupDraft.setupFlag("apps.enabled") && !setupDraft.setupFlag("entra.enabled"),"wizard never enables optional modules just by reviewing them")
+check(SetupWizardProgress(step:999).currentStep == .start,"unknown saved wizard step safely returns to start")
+check(SetupWizardProgress(step:-1).currentStep == .start,"negative saved wizard step cannot index navigation")
+setupDraft.edits["update.deadline"]="2026-12-01T18:00:00Z"
+setupDraft.edits["update.autoInstallAfterDeadline"]="true"
+setupDraft.edits["auth.localAccount"]="managed-example"
+setupDraft.edits["ui.orgName"]="Example Organization"
+setupDraft.edits["schedule.alertStartHour"]="9"
+setupDraft.edits["update.targetVersion"]="27.2"
+setupDraft.chooseSetupStrategy(.minor)
+check(setupDraft.setupStrategy == .minor && setupDraft.setupValue("update.targetVersion").isEmpty,"minor tracking deliberately clears fixed target")
+check(setupDraft.setupValue("update.deadline") == "2026-12-01T18:00:00Z","setup preset preserves YAML deadline override")
+check(setupDraft.setupFlag("update.autoInstallAfterDeadline") && setupDraft.setupFlag("debug.dryRun"),"setup preset retains installation and dry-run choices")
+check(setupDraft.setupValue("ui.orgName") == "Example Organization" && setupDraft.setupValue("auth.localAccount") == "managed-example" && setupDraft.setupValue("schedule.alertStartHour") == "9","setup preset preserves branding authorization reference and hours")
+setupDraft.chooseSetupStrategy(.major)
+check(setupDraft.setupStrategy == .major && !setupDraft.setupFlag("auto.minorOnly"),"major tracking remains an explicit draft choice")
+setupDraft.chooseSetupStrategy(.fixed)
+check(!setupDraft.setupIssues(for:.macOS).isEmpty,"fixed-target wizard choice requires a numeric target")
+setupDraft.edits["update.targetVersion"]="27.2"
+check(setupDraft.setupIssues(for:.macOS).isEmpty,"fixed target validates when configured")
+setupDraft.chooseSetupStrategy(.disabled)
+check(setupDraft.setupValue("update.targetVersion") == "27.2" && setupDraft.setupFlag("update.autoInstallAfterDeadline"),"disabling checks preserves target and enforcement choices")
+var badSetup=ConfigDocument.fresh
+badSetup.edits["debug.dryRun"]="maybe"
+check(!badSetup.setupIssues.isEmpty,"wizard rejects malformed boolean values rather than treating them as false")
+badSetup = .fresh;badSetup.edits["schedule.alertStartHour"]="18";badSetup.edits["schedule.alertEndHour"]="8"
+check(!badSetup.setupIssues(for:.macOS).isEmpty,"wizard blocks reversed working hours")
+badSetup = .fresh;badSetup.edits["update.deadline"]="next Tuesday"
+check(!badSetup.setupIssues(for:.macOS).isEmpty,"wizard rejects non-ISO deadline override")
+badSetup = .fresh;badSetup.edits["apps.enabled"]="true"
+check(!badSetup.setupIssues(for:.apps).isEmpty,"enabled app policy requires explicit approval")
+badSetup.approveApp("chrome",enabled:true)
+check(badSetup.setupIssues(for:.apps).isEmpty,"approved supported app policy validates")
+badSetup.edits["apps.approved"]="unsupported"
+check(!badSetup.setupIssues(for:.apps).isEmpty,"wizard rejects unsupported app approvals")
+badSetup = .fresh;badSetup.edits["entra.policyID"]="0"
+check(!badSetup.setupIssues(for:.registration).isEmpty,"registration policy must be a positive ID")
+badSetup = .fresh;badSetup.edits["ui.helpURL"]="http://example.invalid"
+check(!badSetup.setupIssues(for:.branding).isEmpty,"wizard validates support URL before continuing")
+badSetup = .fresh;badSetup.edits["ui.accentColorHex"]="blue"
+check(!badSetup.setupIssues(for:.branding).isEmpty,"wizard validates branding color")
+var coverageDraft=ConfigDocument.fresh
+let originalFingerprint=coverageDraft.setupFingerprint
+check(originalFingerprint == coverageDraft.setupFingerprint,"draft fingerprint is deterministic")
+var setupProgress=SetupWizardProgress()
+let toastInstall=SetupPreviewRequirement(state:"toast",code:0,title:"Install")
+setupProgress.record(document:coverageDraft,state:"toast",code:0,automatic:true,now:readinessNow)
+check(!toastInstall.exercised(document:coverageDraft,progress:setupProgress),"automatic events never count as exercised button choices")
+setupProgress.record(document:coverageDraft,state:"toast",code:0,automatic:false,now:readinessNow)
+check(toastInstall.exercised(document:coverageDraft,progress:setupProgress),"explicit simulated button choice counts for exact draft")
+let scheduleChoice=SetupPreviewRequirement(state:"softNudge",code:3,title:"Schedule")
+setupProgress.record(document:coverageDraft,state:"softNudge",code:nil,automatic:false)
+check(!scheduleChoice.exercised(document:coverageDraft,progress:setupProgress),"opening scheduler does not certify schedule confirmation")
+setupProgress.record(document:coverageDraft,state:"softNudge",code:3,automatic:false)
+check(scheduleChoice.exercised(document:coverageDraft,progress:setupProgress),"confirming simulated reminder schedule counts distinctly")
+setupProgress.markReviewed(coverageDraft,now:readinessNow)
+check(setupProgress.reviewed(coverageDraft),"review attestation is scoped to exact valid draft")
+coverageDraft.edits["ui.orgName"]="Changed Branding"
+check(coverageDraft.setupFingerprint != originalFingerprint && !setupProgress.reviewed(coverageDraft),"changing draft invalidates its previous review attestation")
+check(!toastInstall.exercised(document:coverageDraft,progress:setupProgress),"old button checks cannot certify changed draft")
+let brandingFingerprint=coverageDraft.setupFingerprint
+coverageDraft.logoImageData=Data([1,2,3])
+check(coverageDraft.setupFingerprint != brandingFingerprint,"attached logo bytes participate in preview identity")
+let historyData=try JSONEncoder().encode(setupProgress)
+let historyText=String(data:historyData,encoding:.utf8)!
+check(!historyText.contains("Changed Branding") && !historyText.contains("update:") && !historyText.contains("Example Organization"),"wizard progress stores hashes and choices rather than draft content")
+let restoredSetup=try JSONDecoder().decode(SetupWizardProgress.self,from:historyData)
+check(restoredSetup.previewEvents.count == setupProgress.previewEvents.count,"wizard progress round-trips independently of installed state")
+let eventCount=setupProgress.previewEvents.count
+setupProgress.record(document:coverageDraft,state:"unknown-state",code:0,automatic:false)
+setupProgress.record(document:coverageDraft,state:"toast",code:99,automatic:false)
+check(setupProgress.previewEvents.count == eventCount,"invalid state and failure codes cannot enter successful-choice history")
+for _ in 0..<110 {setupProgress.record(document:coverageDraft,state:"toast",code:1,automatic:false)}
+check(setupProgress.previewEvents.count == 100,"saved preview history remains bounded")
+var hiddenButtons=ConfigDocument.fresh
+hiddenButtons.edits["toast.showDeferButton"]="false";hiddenButtons.edits["toast.showCloseButton"]="false";hiddenButtons.edits["update.maxDeferrals"]="0"
+check(!hiddenButtons.setupPreviewRequirements.contains{$0.code == 1 || $0.code == 2 || $0.code == 3},"preview checklist does not require hidden deferral or close buttons")
+hiddenButtons.edits["apps.enabled"]="true";hiddenButtons.approveApp("chrome",enabled:true);hiddenButtons.edits["entra.enabled"]="true"
+check(hiddenButtons.setupPreviewRequirements.contains{$0.state == "appUpdates"} && hiddenButtons.setupPreviewRequirements.contains{$0.state == "entraRegistration"},"enabled optional modules add relevant preview choices")
+let missingSetupFindings=ConfigDocument.fresh.setupFindings(snapshot:nil,providerPresent:nil,now:readinessNow)
+check(missingSetupFindings.contains{$0.id == "authorization" && $0.title.contains("not verified")},"wizard never certifies unattended authorization without evidence")
+check(missingSetupFindings.contains{$0.id == "engine" && $0.title.contains("not loaded")},"no snapshot is not presented as installed readiness")
+var riskyDraft=ConfigDocument.fresh
+riskyDraft.edits["debug.dryRun"]="false";riskyDraft.edits["update.autoInstallAfterDeadline"]="true";riskyDraft.edits["update.deadline"]="2020-01-01T00:00:00Z"
+riskyDraft.edits["apps.enabled"]="true";riskyDraft.approveApp("chrome",enabled:true);riskyDraft.edits["apps.autoUpdateClosed"]="true";riskyDraft.edits["entra.enabled"]="true";riskyDraft.edits["uptime.enabled"]="true"
+var setupSnapshot=snap;setupSnapshot.entra=userFixture
+let riskyFindings=riskyDraft.setupFindings(snapshot:setupSnapshot,providerPresent:false,now:readinessNow)
+check(riskyFindings.contains{$0.id == "mode" && $0.level == .attention},"final review highlights live-policy implications")
+check(riskyFindings.contains{$0.id == "deadline"} && riskyFindings.contains{$0.id == "automatic"},"expired override and automatic installation remain visible in final review")
+check(riskyFindings.contains{$0.id == "closed"} && riskyFindings.contains{$0.id == "provider" && $0.level == .attention},"automatic app policy does not hide a missing provider")
+check(riskyFindings.contains{$0.id == "enrollment"} && riskyFindings.contains{$0.id == "restart"},"saved unenrolled evidence and preserved restart policy are highlighted")
+let presentProvider=riskyDraft.setupFindings(snapshot:nil,providerPresent:true)
+check(presentProvider.first{$0.id == "provider"}?.title.contains("trust not verified") == true,"provider-file presence never claims trusted installation readiness")
+var invalidAttestation=SetupWizardProgress();invalidAttestation.markReviewed(badSetup)
+check(!invalidAttestation.reviewed(badSetup),"invalid draft cannot be marked reviewed")
+
+riskyDraft.edits["ui.hardBlockFullscreen"]="true";riskyDraft.edits["update.forceRestartAfterInstall"]="true"
+let escalationFindings=riskyDraft.setupFindings(snapshot:nil,providerPresent:nil)
+check(escalationFindings.contains{$0.id == "fullscreen"} && escalationFindings.contains{$0.id == "installRestart"}, "review exposes preserved full-screen and post-install restart choices")
+var changedMode=ConfigDocument.fresh
+var modeProgress=SetupWizardProgress();modeProgress.record(document:changedMode,state:"toast",code:0,automatic:false)
+changedMode.edits["debug.dryRun"]="false"
+check(!toastInstall.exercised(document:changedMode,progress:modeProgress), "switching from rehearsal to live draft requires new preview evidence")
+
+let roundClockDraft=ConfigDocument.fresh
+let roundClockEngine=CLIConfig.parse(yaml:roundClockDraft.yaml)
+check(!roundClockEngine.schedule.respectAlertWindow && roundClockEngine.update.prepareAtDeadlineWhenLoggedOut,"fresh wizard writes explicit 24/7 and logged-out preparation policies")
+check(roundClockEngine.debug.dryRun && !roundClockEngine.auto.enabled,"24/7 defaults do not activate monitoring or bypass dry-run setup")
+let unrestricted=DashboardHours(start:8,end:18,weekdays:true,restricted:false)
+let weekendEligibility=ISO8601DateFormatter().date(from:"2026-11-07T23:00:00Z")!
+check(unrestricted.nextAllowed(weekendEligibility,calendar:utc)==weekendEligibility,"readiness honors disabled hours on weekends and evenings")
+var restrictedDraft=roundClockDraft;restrictedDraft.edits["schedule.respectAlertWindow"]="true"
+check(CLIConfig.parse(yaml:restrictedDraft.yaml).schedule.respectAlertWindow,"admins can opt back into preserved working hours")
+let preservedHours=CLIConfig.parse(yaml:restrictedDraft.yaml)
+check(preservedHours.schedule.alertStartHour==8 && preservedHours.schedule.skipWeekends,"re-enabling the restriction retains stored hours and weekdays")
+let summary24=InstalledPolicySummary(DashboardConfig.parse(yaml:roundClockDraft.yaml))
+check(!summary24.macHours.restricted && summary24.entraHours.restricted,"macOS/app hours toggle does not change independent registration hours")
+let informationalContext=UIContext(config:UIConfig(),state:.toast)
+informationalContext.informationalToastMessage="Informational test; no update running"
+informationalContext.exit(.dismiss)
+check(informationalContext.demoAction.contains("Dismissed"),"informational toast dismiss remains a simulated non-install action")
+let preparationFixture=try JSONSerialization.data(withJSONObject:["target":"27.2","phase":"downloaded","reason":"Download only; no installation requested","checkedAt":readinessNow.timeIntervalSinceReferenceDate])
+try preparationFixture.write(to:readinessFolder.appendingPathComponent("preparation.json"))
+let preparationSnapshot=reader.load()
+check(preparationSnapshot.preparation?.phase == "downloaded", "passive readiness reads saved preparation without running a download")
+
+// Staged wallpaper and notification-history fixtures. No desktop APIs or engine commands.
+let wallpaperFresh=ConfigDocument.fresh
+check(!wallpaperFresh.setupFlag("compliance.wallpaperEnabled"),"new admin drafts leave visual enforcement opt-in")
+let wallpaperEngine=CLIConfig.parse(yaml:wallpaperFresh.yaml)
+check(!wallpaperEngine.compliance.wallpaperEnabled && wallpaperEngine.compliance.nonCompliantWallpaper==WallpaperPolicy.defaultImage,"wallpaper config round-trips through the real engine parser")
+var enabledWallpaper=wallpaperFresh;enabledWallpaper.edits["compliance.wallpaperEnabled"]="true"
+check(!enabledWallpaper.problems.isEmpty,"wallpaper enablement requires an automatic macOS policy")
+enabledWallpaper.followReleases(allowMajorUpgrades:false)
+check(enabledWallpaper.problems.isEmpty,"wallpaper works with a valid setup-once tracking policy")
+enabledWallpaper.edits["compliance.nonCompliantWallpaper"]="/Users/example/private.jpg"
+check(!enabledWallpaper.problems.isEmpty,"deployed wallpaper references stay in managed working storage")
+let fixturePNG=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
+let wallpaperPNG=try WallpaperAssetImage.normalizedPNG(fixturePNG)
+check(NSImage(data:wallpaperPNG) != nil,"wallpaper upload normalizes a supported image into PNG")
+let wallpaperDigest=WallpaperAssetImage.digest(wallpaperPNG)
+let wallpaperRef=WallpaperAssetReference(role:"noncompliant",digest:wallpaperDigest,originalName:"private-original-name.png")
+check(wallpaperRef.valid && wallpaperRef.deployedPath.hasPrefix(WallpaperPolicy.managedDirectory+"/noncompliant-"),"normalized wallpaper gets a managed content-addressed deployment path")
+let stagedWallpaperFolder=FileManager.default.temporaryDirectory.appendingPathComponent("push-wallpaper-fixture-"+UUID().uuidString)
+try FileManager.default.createDirectory(at:stagedWallpaperFolder,withIntermediateDirectories:false)
+defer{try? FileManager.default.removeItem(at:stagedWallpaperFolder)}
+try wallpaperPNG.write(to:stagedWallpaperFolder.appendingPathComponent(wallpaperRef.fileName))
+let verifiedWallpaperBytes=try WallpaperAssetImage.read(wallpaperRef,folder:stagedWallpaperFolder)
+check(verifiedWallpaperBytes==wallpaperPNG,"staged image bytes are verified against the recorded digest")
+try Data("changed".utf8).write(to:stagedWallpaperFolder.appendingPathComponent(wallpaperRef.fileName))
+var changedAssetRejected=false
+do {_ = try WallpaperAssetImage.read(wallpaperRef,folder:stagedWallpaperFolder)}catch{changedAssetRejected=true}
+check(changedAssetRejected,"changed staged image is rejected rather than silently deployed")
+let invalidRef=WallpaperAssetReference(role:"../",digest:wallpaperDigest,originalName:"example")
+check(!invalidRef.valid,"asset references reject role traversal")
+var attachedWallpaper=wallpaperFresh;attachedWallpaper.wallpaperAssets=["noncompliant":wallpaperRef];attachedWallpaper.edits["compliance.nonCompliantWallpaper"]=wallpaperRef.deployedPath
+let attachmentWire=try JSONEncoder().encode(attachedWallpaper)
+check(!String(data:attachmentWire,encoding:.utf8)!.contains(wallpaperPNG.base64EncodedString()),"draft keeps wallpaper references instead of embedding large image data")
+let attachmentRoundTrip=try JSONDecoder().decode(ConfigDocument.self,from:attachmentWire)
+check(attachmentRoundTrip.wallpaperAssets?["noncompliant"]?.digest==wallpaperDigest,"draft resumes staged wallpaper references")
+let priorWallpaperHash=attachedWallpaper.setupFingerprint
+attachedWallpaper.edits["compliance.nonCompliantWallpaper"]=WallpaperPolicy.defaultImage
+check(attachedWallpaper.setupFingerprint != priorWallpaperHash,"changing deployed wallpaper invalidates the old draft review fingerprint")
+let historyTime=readinessNow
+var requestedEvent=NotificationHistoryEvent(attempt:"attempt-a",date:historyTime,state:"toast",mode:"scheduled",outcome:"requested",reason:"Requested",code:nil,userUID:501,target:"27.2",retryAt:nil)
+var displayedEvent=requestedEvent;displayedEvent.id=UUID().uuidString;displayedEvent.date=historyTime.addingTimeInterval(1);displayedEvent.outcome="displayed"
+var laterEvent=displayedEvent;laterEvent.id=UUID().uuidString;laterEvent.date=historyTime.addingTimeInterval(2);laterEvent.outcome="response";laterEvent.code=1;laterEvent.reason="Later selected"
+let groupedHistory=NotificationTimelineEntry.group([requestedEvent,displayedEvent,laterEvent])
+check(groupedHistory.count==1 && groupedHistory[0].displayed && groupedHistory[0].status=="User response","timeline correlates request, visibility and response without confusing them")
+check(NotificationTimelineEntry.group([requestedEvent])[0].status=="Delivery unconfirmed" && !NotificationTimelineEntry.group([requestedEvent])[0].displayed,"a nonblocking request does not become confirmed delivery")
+let historyFixturePath=stagedWallpaperFolder.appendingPathComponent("history.json")
+try JSONEncoder().encode(NotificationHistoryDocument(events:[requestedEvent,displayedEvent,laterEvent])).write(to:historyFixturePath)
+let loadedHistoryFixture=try NotificationHistoryReader.read(historyFixturePath.path)
+check(loadedHistoryFixture.events.count==3,"history refresh reads saved fixture events only")
+try Data("broken".utf8).write(to:historyFixturePath)
+var badHistoryRejected=false
+do {_ = try NotificationHistoryReader.read(historyFixturePath.path)}catch{badHistoryRejected=true}
+check(badHistoryRejected,"corrupt saved history stays an error instead of fabricated delivery evidence")
+let emptyHistoryFixture=try NotificationHistoryReader.read(stagedWallpaperFolder.appendingPathComponent("missing.json").path)
+check(emptyHistoryFixture.events.isEmpty,"missing history is empty rather than a health success")
+let timelineWallpaper=NotificationHistoryEvent(attempt:"wallpaper",date:historyTime,state:"wallpaper",mode:"scheduled",outcome:"applied",reason:"Managed image reapplied",code:nil,userUID:501,target:"27.2",retryAt:nil)
+check(NotificationTimelineEntry.group([timelineWallpaper])[0].status=="Wallpaper changed" && !NotificationTimelineEntry.group([timelineWallpaper])[0].displayed,"wallpaper application is not mislabeled as notification delivery")
+var oldDraftObject=try JSONSerialization.jsonObject(with:attachmentWire) as! [String:Any]
+oldDraftObject.removeValue(forKey:"wallpaperAssets")
+let oldDraftDecoded=try JSONDecoder().decode(ConfigDocument.self,from:JSONSerialization.data(withJSONObject:oldDraftObject))
+check(oldDraftDecoded.wallpaperAssets == nil,"older saved drafts decode without wallpaper attachments")
+
+let recoveryPolicy=CLIConfig.parse(yaml:"update:\n  deadlineRecoveryEnabled: true\n  retryCountdownMinutes: 12\n  retryBackoffMinutes: 45\n  maxAutomaticRetriesPerDay: 2\nui:\n  menuBarEnabled: false\n")
+check(recoveryPolicy.update.retryCountdownMinutes==12 && recoveryPolicy.update.retryBackoffMinutes==45,"recovery countdown and backoff parse from YAML")
+check(recoveryPolicy.update.maxAutomaticRetriesPerDay==2 && !recoveryPolicy.ui.menuBarEnabled,"retry budget and menu preference parse from YAML")
+check(RecoveryFailureKind.authorization.allowsAutomaticRetry == false,"IT authorization blockers cannot receive an automatic retry bypass")
+check(RecoveryFailureKind.network.allowsAutomaticRetry,"temporary network failure can be retried after checks")
+let adminRecovery=RecoveryNotice.preview()
+check(adminRecovery.automatic && adminRecovery.remaining(at:Date())>0,"recovery preview contains a future countdown")
+check(!adminRecovery.countdownDue(at:Date()),"preview does not expire early")
+check(previewButtonTitle(state:"updateRecovery",code:7)=="Automatic recovery retry due","automatic expiry is not reported as user consent")
+check(!UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:true,requestsEnabled:true,pending:false,monitor:true,target:"27.2",running:"27.0"),"menu requests stay disabled under dry-run policy")
+
+let generatedProfiles=try DeploymentProfiles.files(teamID:"")
+check(generatedProfiles.count==2,"export contains notification and background profiles only")
+let notifyProfile=try PropertyListSerialization.propertyList(from:generatedProfiles["JamfCheckIn-Notifications.mobileconfig"]!,format:nil) as! [String:Any]
+let notifyPayload=(notifyProfile["PayloadContent"] as! [[String:Any]])[0]
+let notifySettings=(notifyPayload["NotificationSettings"] as! [[String:Any]])[0]
+check(notifyPayload["PayloadType"] as? String == "com.apple.notificationsettings","notification profile uses the Apple payload type")
+check(notifySettings["BundleIdentifier"] as? String == DeploymentProfiles.jamfID,"notification profile matches the existing JamfCheckIn identity")
+check(notifySettings["ShowInLockScreen"] as? Bool == false,"export avoids exposing notification content on the lock screen")
+let teamProfiles=try DeploymentProfiles.files(teamID:"A1B2C3D4E5")
+let managedProfile=try PropertyListSerialization.propertyList(from:teamProfiles["PUSH-Background-Items.mobileconfig"]!,format:nil) as! [String:Any]
+let managedPayload=(managedProfile["PayloadContent"] as! [[String:Any]])[0]
+let managedRules=managedPayload["Rules"] as! [[String:Any]]
+check(managedPayload["PayloadType"] as? String == "com.apple.servicemanagement","background approval uses Apple's Service Management payload")
+check(managedRules.count==4 && managedRules.allSatisfy{$0["TeamIdentifier"] as? String == "A1B2C3D4E5"},"production Team ID constrains every exact background rule")
+check(!managedRules.contains{($0["RuleType"] as? String)?.contains("Prefix")==true || $0["RuleType"] as? String == "TeamIdentifier"},"no broad prefix or team-wide approval is generated")
+check(!managedRules.contains{$0["RuleValue"] as? String == "com.push.status"},"retired standalone menu gets no managed approval")
+var malformedTeam=false
+do {_ = try DeploymentProfiles.files(teamID:"bad team")}catch{malformedTeam=true}
+check(malformedTeam,"malformed Team IDs are rejected rather than placed in a profile")
+check(DeploymentBundle.allowedAsset("assets/popup-logo.png") && DeploymentBundle.allowedAsset("assets/wallpapers/noncompliant-ab12.png"),"deployment allows only managed PNG assets")
+check(!DeploymentBundle.allowedAsset("../config.yaml") && !DeploymentBundle.allowedAsset("assets/wallpapers/../../evil.png") && !DeploymentBundle.allowedAsset("/Library/evil.png"),"asset paths cannot escape the staged managed directory")
+let exportFixture=FileManager.default.temporaryDirectory.appendingPathComponent("push-bundle-test-"+UUID().uuidString)
+try FileManager.default.createDirectory(at:exportFixture,withIntermediateDirectories:false)
+defer {try? FileManager.default.removeItem(at:exportFixture)}
+let fixtureClient=exportFixture.appendingPathComponent("fixture.pkg")
+try Data("OFFLINE FIXTURE — NOT AN INSTALLER".utf8).write(to:fixtureClient)
+let fixtureExport=exportFixture.appendingPathComponent("bundle")
+try DeploymentBundle.write(.init(yaml:ConfigDocument.fresh.yaml,assets:["assets/popup-logo.png":Data("fixture image".utf8)],teamID:""),client:fixtureClient,to:fixtureExport)
+check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PUSH-Client-1.9.1.pkg").path),"bundle includes the supplied client artifact")
+check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PolicyPayload/Library/Management/PUSH/assets/popup-logo.png").path),"bundle stages images at their managed destinations")
+let exportManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:fixtureExport.appendingPathComponent("manifest.json"))) as! [String:Any]
+check(exportManifest["adminIncludedOnClients"] as? Bool == false,"manifest explicitly excludes the admin app from clients")
+check((exportManifest["signingReadiness"] as? String)?.contains("Local testing")==true,"export does not claim production signing without a verified release")
+let manifestFiles=exportManifest["files"] as! [[String:String]]
+check(manifestFiles.allSatisfy{entry in (try? Data(contentsOf:fixtureExport.appendingPathComponent(entry["path"]!))).map{DeploymentBundle.digest($0)==entry["sha256"]} == true},"every manifest hash matches the staged artifact")
+var refusedOverwrite=false
+do {try DeploymentBundle.write(.init(yaml:ConfigDocument.fresh.yaml,assets:[:],teamID:""),client:fixtureClient,to:fixtureExport)}catch{refusedOverwrite=true}
+check(refusedOverwrite,"existing deployment bundles are never overwritten")
+let unsafeExport=exportFixture.appendingPathComponent("unsafe")
+var refusedUnsafeAsset=false
+do {try DeploymentBundle.write(.init(yaml:ConfigDocument.fresh.yaml,assets:["../escape.png":Data()],teamID:""),client:fixtureClient,to:unsafeExport)}catch{refusedUnsafeAsset=true}
+check(refusedUnsafeAsset && !FileManager.default.fileExists(atPath:unsafeExport.path),"invalid assets leave no published partial bundle")
+check(DeploymentBundle.enableMonitor.contains("--enable-reviewed-policy") && DeploymentBundle.buildPolicy.contains("pkgbuild"),"activation is deliberate and separate from building policy")
+check(!DeploymentBundle.buildPolicy.contains("install-daemon") && !DeploymentBundle.buildPolicy.contains("installer -pkg"),"building a policy package neither installs it nor starts a monitor")
+
+let fixtureRestart=RestartProfileIdentity(teamID:"A1B2C3D4E5",requirement:"identifier \"push-cli\" and anchor apple generic",sha256:String(repeating:"a",count:64))
+let restartProfiles=try DeploymentProfiles.files(teamID:"A1B2C3D4E5",restartIdentity:fixtureRestart)
+check(restartProfiles.count==3,"restart approval is conditional on a supplied signing identity")
+let restartProfile=try PropertyListSerialization.propertyList(from:restartProfiles["PUSH-Gentle-Restart-PPPC.mobileconfig"]!,format:nil) as! [String:Any]
+let restartPayload=(restartProfile["PayloadContent"] as! [[String:Any]])[0]
+let restartServices=restartPayload["Services"] as! [String:Any]
+check(Set(restartServices.keys)==["AppleEvents"],"restart profile does not grant Full Disk Access or unrelated privacy services")
+let restartEntry=(restartServices["AppleEvents"] as! [[String:Any]])[0]
+check(restartEntry["Identifier"] as? String == "/Library/Management/PUSH/push-cli" && restartEntry["IdentifierType"] as? String == "path","restart sender is bound to the managed executable path")
+check(restartEntry["AEReceiverIdentifier"] as? String == "com.apple.systemevents" && restartEntry["AEReceiverCodeRequirement"] as? String == "identifier \"com.apple.systemevents\" and anchor apple","restart automation is limited to Apple's signed System Events")
+check(restartEntry["Allowed"] as? Bool == true && restartEntry["Authorization"] == nil,"PPPC uses one supported authorization representation")
+var mismatchedSigningRejected=false
+do {_ = try DeploymentProfiles.files(teamID:"Z1B2C3D4E5",restartIdentity:fixtureRestart)}catch{mismatchedSigningRejected=true}
+check(mismatchedSigningRejected,"signing-team mismatches cannot generate a misleading approval")
+check(!RestartProfileIdentity(teamID:"A1B2C3D4E5",requirement:"cdhash abc",sha256:String(repeating:"a",count:64)).valid(for:"A1B2C3D4E5"),"unstable hash-only requirements are rejected")
+
+var advisorDraft=ConfigDocument.fresh
+let advisorNow=Date(timeIntervalSince1970:2_000_000_000)
+let basicAdvice=SetupAdvisor.evaluate(advisorDraft,catalogDate:nil,catalogCached:false,providerPresent:nil,mistPresent:nil,now:advisorNow)
+check(basicAdvice.contains{$0.id=="discovery" && !$0.changes.isEmpty},"disabled discovery gets an actionable setup suggestion")
+check(basicAdvice.contains{$0.id=="support"} && basicAdvice.contains{$0.id=="catalog"},"missing support contact and release evidence get concrete suggestions")
+check(SetupAdvisor.smartDefaults["debug.dryRun"]==nil && SetupAdvisor.smartDefaults["update.autoInstallAfterDeadline"]==nil && SetupAdvisor.smartDefaults["update.deadline"]==nil,"recommended defaults never silently activate installs or erase deadline overrides")
+for (key,value) in SetupAdvisor.smartDefaults {advisorDraft.edits[key]=value}
+check(advisorDraft.setupFlag("auto.trackLatest") && advisorDraft.setupFlag("auto.minorOnly") && advisorDraft.setupFlag("debug.dryRun"),"smart defaults follow stable minor releases while preserving dry-run")
+advisorDraft.edits["update.deadline"]="2026-01-01T00:00:00Z"
+advisorDraft.edits["update.toastIntervalSeconds"]="7200"
+advisorDraft.edits["schedule.respectAlertWindow"]="true"
+let restrictedAdvice=SetupAdvisor.evaluate(advisorDraft,catalogDate:advisorNow,catalogCached:false,providerPresent:true,mistPresent:true,now:advisorNow)
+check(restrictedAdvice.contains{$0.id=="deadline" && $0.changes["update.deadline"]==""},"expired deadline receives an explicit clear-override choice")
+check(advisorDraft.setupValue("update.deadline")=="2026-01-01T00:00:00Z","evaluating suggestions does not mutate the draft")
+check(restrictedAdvice.contains{$0.id=="hourly"} && restrictedAdvice.contains{$0.id=="hours"},"nonhourly and restricted reminders explain missing toasts")
+check(!restrictedAdvice.contains{$0.id=="catalog"},"fresh catalog evidence is not falsely labeled stale")
+var rejectedDryActivation=false
+do {try ConfiguredClientBuilder.validate(.fresh,activation:.monitor)}catch{rejectedDryActivation=true}
+check(rejectedDryActivation,"live package activation rejects dry-run policies")
+try ConfiguredClientBuilder.validate(.fresh,activation:.paused)
+check(true,"safe fresh policy can be packaged with monitoring paused")
+var noPolicy=ConfigDocument.fresh;noPolicy.edits["debug.dryRun"]="false"
+var rejectedEmptyActivation=false
+do {try ConfiguredClientBuilder.validate(noPolicy,activation:.monitor)}catch{rejectedEmptyActivation=true}
+check(rejectedEmptyActivation,"activation requires an enabled managed workflow")
+var liveDraft=ConfigDocument.fresh
+for (key,value) in SetupAdvisor.smartDefaults {liveDraft.edits[key]=value}
+liveDraft.edits["debug.dryRun"]="false"
+try ConfiguredClientBuilder.validate(liveDraft,activation:.monitor)
+check(true,"reviewed live discovery policy permits explicit monitoring activation")
+let pausedInstallScript=ConfiguredClientBuilder.postinstall(activation:.paused,main:true,entra:false,yamlHash:String(repeating:"a",count:64))
+check(!pausedInstallScript.contains("install-daemon") && !pausedInstallScript.contains("launchctl"),"paused configured installer has no activation commands")
+let activeInstallScript=ConfiguredClientBuilder.postinstall(activation:.monitor,main:true,entra:true,yamlHash:String(repeating:"b",count:64))
+check(activeInstallScript.contains("shasum") && activeInstallScript.range(of:"shasum")!.lowerBound<activeInstallScript.range(of:"launchctl bootstrap")!.lowerBound,"reviewed YAML hash is checked before future service activation")
+check(activeInstallScript.contains("launchctl print \"system/$label\""),"configured activation verifies loaded service rather than assuming CLI success")
+let combinedPreflight=ConfiguredClientBuilder.preinstall(assetPaths:["assets/popup-logo.png"])
+check(combinedPreflight.contains("engine-preinstall") && combinedPreflight.contains("jamf-preinstall") && combinedPreflight.contains("symbolic link"),"configured package retains both backup preflights and protects policy/image paths")
+check(SetupAdvisor.evaluate(liveDraft,catalogDate:advisorNow,catalogCached:true,providerPresent:nil,mistPresent:false,now:advisorNow).contains{$0.id=="catalog"},"cached catalog data is identified even when its timestamp is recent")
+
+if let clientPath=ProcessInfo.processInfo.environment["PUSH_TEST_CLIENT"],let folder=ProcessInfo.processInfo.environment["PUSH_TEST_BUILD_FOLDER"] {
+    let client=URL(fileURLWithPath:clientPath),output=URL(fileURLWithPath:folder)
+    try FileManager.default.createDirectory(at:output,withIntermediateDirectories:false)
+    var pilot=ConfigDocument.fresh
+    pilot.edits["ui.logoPath"]=deployedPopupLogoPath
+    let image=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
+    let paused=output.appendingPathComponent("paused")
+    try ConfiguredClientBuilder.build(.init(yaml:pilot.yaml,assets:["assets/popup-logo.png":image],teamID:""),client:client,activation:.paused,to:paused)
+    check(FileManager.default.fileExists(atPath:paused.appendingPathComponent("PUSH-Configured-Client.pkg").path),"real embedded client builds into one paused configured installer")
+    let active=output.appendingPathComponent("active")
+    try ConfiguredClientBuilder.build(.init(yaml:liveDraft.yaml,assets:[:],teamID:""),client:client,activation:.monitor,to:active)
+    let activeManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:active.appendingPathComponent("manifest.json"))) as! [String:Any]
+    check(activeManifest["activation"] as? String == "monitor" && activeManifest["adminIncludedOnClients"] as? Bool == false,"real active-package build records explicit activation and excludes Admin")
+    var blockedRestart=liveDraft;blockedRestart.edits["uptime.enabled"]="true"
+    var refusedUnmatchedRestart=false
+    do {try ConfiguredClientBuilder.build(.init(yaml:blockedRestart.yaml,assets:[:],teamID:"A1B2C3D4E5",restartIdentity:fixtureRestart),client:client,activation:.monitor,to:output.appendingPathComponent("blocked-restart"))}catch{refusedUnmatchedRestart=true}
+    check(refusedUnmatchedRestart && !FileManager.default.fileExists(atPath:output.appendingPathComponent("blocked-restart").path),"ad-hoc embedded client cannot be published with a misleading production restart approval")
+    var rejectedInstallerCommand=false
+    do {try ConfiguredClientBuilder.command("/usr/sbin/installer",[],folder:output)}catch{rejectedInstallerCommand=true}
+    check(rejectedInstallerCommand,"builder command boundary rejects running an installer")
+}
 
 print("Passed \(checks) offline checks. No app, Mist query, Keychain operation, admin action, upgrade, or restart was executed.")

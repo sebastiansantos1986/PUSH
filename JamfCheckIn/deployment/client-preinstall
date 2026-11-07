@@ -1,0 +1,29 @@
+#!/bin/bash
+# Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
+set -euo pipefail
+umask 077
+[[ "${3:-/}" == / ]] || exit 1
+root=/Library/Management/PUSH-backups
+for directory in /Applications /Library/Management "$root" /Library/LaunchAgents; do
+    if [[ -e "$directory" || -L "$directory" ]]; then
+        [[ -d "$directory" && ! -L "$directory" && "$(/usr/bin/stat -f %u "$directory")" == 0 ]] || exit 1
+    fi
+done
+/bin/mkdir -p "$root"
+/bin/chmod 700 "$root"
+backup="$root/JamfCheckIn-$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
+/bin/mkdir "$backup"
+app=/Applications/JamfCheckIn.app
+agent=/Library/LaunchAgents/com.sebastianitconsulting.jamfcheckin.plist
+if [[ -e "$app" || -L "$app" ]]; then
+    [[ -d "$app" && ! -L "$app" && "$(/usr/bin/stat -f %u "$app")" == 0 ]] || { echo 'Existing JamfCheckIn needs ownership/path review before replacement.' >&2; exit 1; }
+    [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" == com.sebastianitconsulting.jamfcheckin ]] || exit 1
+    /usr/bin/ditto "$app" "$backup/JamfCheckIn.app"
+fi
+if [[ -e "$agent" || -L "$agent" ]]; then /bin/cp -Pp "$agent" "$backup/"; fi
+# Stop existing per-user agents in every active login session before replacing files.
+for uid in $(/bin/ps -axo uid=,comm= | /usr/bin/awk '($2 ~ /loginwindow$/ || $2 ~ /JamfCheckIn$/ || $2 ~ /push-status$/) && $1 != 0 {print $1}' | /usr/bin/sort -u); do
+    /bin/launchctl bootout "gui/$uid/com.sebastianitconsulting.jamfcheckin" 2>/dev/null || true
+done
+/usr/bin/pkill -x JamfCheckIn 2>/dev/null || true
+echo "Previous JamfCheckIn backed up to $backup. The replacement starts at next login; no app or Jamf workflow was launched."

@@ -16,7 +16,7 @@ struct PopupCommand {
     let args: [String]
 
     static let validStates = [
-        "toast", "appUpdates", "entraRegistration", "softNudge", "hardBlock", "preflightPower", "preflightDisk",
+        "updateRecovery", "toast", "appUpdates", "entraRegistration", "softNudge", "hardBlock", "preflightPower", "preflightDisk",
         "passwordPrompt", "downloading", "installing", "rebooting", "compliant", "error",
         "rebootNudge", "rebootForce"
     ]
@@ -90,7 +90,7 @@ struct PopupCommand {
             cliSuccess("User scheduled a reminder for \(date)")
         } else if exitCode == 0 { cliSuccess(message) }
         else if exitCode == 5 && state != "toast" { cliError(message) }
-        else if [1, 2, 3, 4, 5, 6].contains(exitCode) { cliPrint(message) }
+        else if [1, 2, 3, 4, 5, 6, 7].contains(exitCode) { cliPrint(message) }
         else { cliError(message) }
     }
 }

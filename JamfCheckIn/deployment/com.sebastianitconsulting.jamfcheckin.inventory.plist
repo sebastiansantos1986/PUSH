@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sebastianitconsulting.jamfcheckin.inventory</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/jamf</string>
+        <string>recon</string>
+    </array>
+    <!-- Force an inventory update at 10:00 and 16:00 daily. launchd also runs a
+         missed time when the Mac next wakes, so asleep machines still get caught.
+         Add/remove <dict> entries to change the schedule. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>16</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/var/log/jamfcheckin-inventory.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/jamfcheckin-inventory.log</string>
+</dict>
+</plist>

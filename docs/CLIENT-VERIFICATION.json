@@ -1,0 +1,42 @@
+{
+  "engineVersion": "1.9.1",
+  "adminVersion": "1.0.0",
+  "jamfCheckInVersion": "1.1.0",
+  "offlineChecks": {
+    "engine": 343,
+    "admin": 292,
+    "jamfCheckIn": 15
+  },
+  "totalOfflineChecks": 650,
+  "verifiedBundles": [
+    {
+      "app": "push-ui.app",
+      "version": "1.9.1",
+      "architectures": "x86_64 arm64"
+    },
+    {
+      "app": "JamfCheckIn.app",
+      "version": "1.1.0",
+      "architectures": "x86_64 arm64"
+    },
+    {
+      "app": "PUSH Admin.app",
+      "version": "1.0.0",
+      "architectures": "x86_64 arm64"
+    }
+  ],
+  "packageChecks": [
+    "Client excludes PUSH Admin and standalone PUSH Status",
+    "Admin contains the exact matching client package as an export resource",
+    "Package identity/version, universal binaries and ad-hoc signatures",
+    "No privileged monitor/check-in daemon payload; user login agent only",
+    "Backup/migration scripts have no bootstrap/app-launch commands",
+    "Exact notification/background profiles, optional signed-executable restart PPPC fixtures",
+    "Real exported policy package built and inspected, root ownership verified",
+    "Manifest hashes, source parity and Sebastian Santos attribution",
+    "Existing Jamf functionality outside the integration preserved"
+  ],
+  "signing": "Ad-hoc apps; unsigned installers. Developer ID signing/notarization remains a production step.",
+  "liveActions": "No installer, GUI app, profile installation, live request, Jamf command, monitor activation, macOS download/upgrade, wallpaper change or restart was executed.",
+  "pilotRequired": "Visual UI, MDM profile acceptance, TCC attribution for optional gentle restart, managed authorization, scheduler/login/reboot behavior."
+}

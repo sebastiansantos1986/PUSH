@@ -303,6 +303,7 @@ struct ToastView: View {
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var message: String {
+        if let information=ctx.informationalToastMessage {return information}
         if let custom = toast.message, !custom.isEmpty { return custom.resolvedNewlines }
         return ctx.config.isMajor
             ? "A macOS upgrade is ready. Save your work and choose when to begin."
@@ -322,7 +323,7 @@ struct ToastView: View {
             HStack(alignment: .center, spacing: 12) {
                 AppIconView(config: ctx.config, size: 46)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Software Update")
+                    Text(ctx.informationalToastMessage == nil ? "Software Update":"Update status")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.primary)
                     Text(ctx.config.friendlyTargetVersion)
@@ -366,7 +367,10 @@ struct ToastView: View {
                 }
             }
             Rectangle().fill(Color.primary.opacity(0.09)).frame(height: 1)
-            HStack(spacing: 10) {
+            HStack(spacing:10) {
+                if ctx.informationalToastMessage != nil {
+                    Button("Got it") {ctx.exit(.dismiss)}.buttonStyle(PushToastPrimaryStyle(color:accent))
+                } else {
                 if toast.showDeferButton {
                     Button { ctx.exit(.defer_) } label: {
                         Text(toast.deferButtonLabel.isEmpty ? "Later" : toast.deferButtonLabel)
@@ -380,6 +384,7 @@ struct ToastView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PushToastPrimaryStyle(color: accent))
+                }
             }
             if (toast.autoDismissSeconds ?? 0) > 0 {
                 Text(hovering ? "Reminder stays open while you hover" : "Closes in \(secondsLeft) seconds")

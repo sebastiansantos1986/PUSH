@@ -69,12 +69,20 @@ struct AutoCheckCommand {
         guard var health = try? loadStateForAction() else {
             cliError("Saved installation state is unreadable. Restore its backup before running update actions."); return
         }
+        if !checkOnly {WallpaperEnforcement(config:config).run(running:current)}
+        if !checkOnly {InstallRecoveryStore.resolve(running:current)}
         let oldState = health
+        let observedBoot=currentBootTimestamp()
         let activity = installationIsActive()
-        if let recovery = health.recoverInstallation(running: current, boot: currentBootTimestamp(),
+        if let recovery = health.recoverInstallation(running: current, boot: observedBoot,
             target: config.update.targetVersion, active: activity) {
             do { try saveState(health); cliPrint(recovery) }
             catch { cliError("Could not save recovered installation state; no new action started."); return }
+            if !checkOnly,oldState.installStarted,!health.installStarted,!health.installCompleted,
+               let previousBoot=oldState.installBootTimestamp,let observedBoot,abs(previousBoot-observedBoot)>1,
+               RetryPolicy.same(oldState.installTargetVersion ?? "",config.update.targetVersion),!versionGTE(current,config.update.targetVersion) {
+                InstallRecoveryStore.failure(config:config,message:"The Mac restarted but did not reach the required macOS version. The update needs another installation attempt.")
+            }
             if !checkOnly && health.installCompleted && !oldState.installCompleted {
                 NotificationManager(config: config).notifyInstallComplete(version: current, previousVersion: oldState.lastSeenVersion)
                 if FileManager.default.isExecutableFile(atPath: config.jamf.binaryPath) {
@@ -83,12 +91,18 @@ struct AutoCheckCommand {
             }
         }
         guard activity == false else {
+            NotificationHistory.record(state:"macOS",outcome:"delayed",reason:"Competing installer activity is active or cannot be verified",retry:Date().addingTimeInterval(300))
+            if let request=UserRequests.take(config:config){UserRequests.result(request,"Another installer is active or cannot be verified. No competing update was started.")}
             cliPrint("An installer or update process is active, or its activity cannot be verified. No competing action was started."); return
         }
         guard !health.installStarted else {
+            NotificationHistory.record(state:"macOS",outcome:"delayed",reason:"Installation awaits reboot verification; no duplicate workflow started",retry:Date().addingTimeInterval(300))
+            if let request=UserRequests.take(config:config){UserRequests.result(request,"Installation awaits reboot verification. No duplicate update was started.")}
             cliPrint("An installation is awaiting reboot verification; no duplicate installation or new target will be scheduled."); return
         }
         if config.ddm.enabled, let version = detectDDMVersion(), !checkOnly {
+            NotificationHistory.record(state:"macOS",outcome:"delayed",reason:"Apple DDM manages the update; PUSH stepped aside")
+            if let request=UserRequests.take(config:config){UserRequests.result(request,"MDM manages this update. PUSH did not start a competing workflow.")}
             cliPrint("Apple DDM is managing macOS \(version). PUSH will step aside."); return
         }
         cliSection("Checking for macOS updates")
@@ -155,7 +169,12 @@ struct AutoCheckCommand {
             var state = loadState()
             state.deferralCount = 0
             state.nextNudgeDate = .distantPast
-            state.nextToastDate = Date().addingTimeInterval(cfg.toastIntervalSeconds)
+            state.nextToastDate = .distantPast
+            state.lastToastShownAt = nil
+            state.lastToastTarget = nil
+            state.deadlineNoticeTarget = nil
+            state.notificationPendingSince = Date()
+            state.deadlineNoticeShownAt = nil
             state.lastSeenVersion = best.version
             state.installCompleted = false
             do { try saveState(state) } catch { cliError("Could not save discovery state; no action started."); return }
@@ -166,7 +185,25 @@ struct AutoCheckCommand {
         cliInfo("Target:", best.version)
         cliInfo("Deadline:", cfg.effectiveDeadline)
         cliInfo("Deadline source:", cfg.update.deadline.isEmpty ? "Automatic, anchored to first detection" : "Explicit YAML override")
+        if !checkOnly {WallpaperEnforcement(config:cfg).run(running:current)}
         if checkOnly { cliPrint("Check complete. No popup, download, or installation was started."); return }
+        if !checkOnly,!installNow,let request=UserRequests.take(config:cfg) {
+            switch request.action {
+            case .install:
+                guard let live=try? loadConfig(),live.auto.enabled,!live.debug.dryRun,live.update.allowUserUpdateRequests,RetryPolicy.same(live.update.targetVersion,request.target),installationIsActive()==false,let pending=try? loadStateForAction(),!pending.installStarted else {UserRequests.result(request,"Live policy or installation state changed; no update was started.");return}
+                if live.ddm.enabled,detectDDMVersion() != nil {UserRequests.result(request,"MDM manages this update; PUSH did not start a competing workflow.");return}
+                if live.schedule.skipInstallDuringScreenShare && isUserInMeeting() {UserRequests.result(request,"A meeting or screen share is active; retry after it ends.");return}
+                UserRequests.result(request,"Update request accepted. Installation preflight will recheck the configured target and authorization.")
+                InstallWorkflow(config:live,skipInitialPrompt:true).run();return
+            case .remindOneHour:
+                guard !cfg.isPastDeadline else {UserRequests.result(request,"The deadline has passed; reminder scheduling cannot postpone enforcement.");break}
+                var reminder=loadState()
+                let requested=Date().addingTimeInterval(3600)
+                reminder.nextNudgeDate=min(requested,ISO8601DateFormatter().date(from:cfg.effectiveDeadline) ?? requested)
+                do {try saveState(reminder);UserRequests.result(request,"The full reminder was scheduled within the deadline. Hourly toasts remain independent.")}catch{UserRequests.result(request,"The reminder could not be saved.")}
+                return
+            }
+        }
         if installNow {
             RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
             InstallWorkflow(config: cfg, skipInitialPrompt: true).run()
@@ -176,10 +213,13 @@ struct AutoCheckCommand {
             showNudge(config: cfg)
             return
         }
-        if !isForced && !isWithinAlertWindow(config: cfg) {
+        if !userIsLoggedIn() {runNudgeSchedule(config:cfg);return}
+        if !isForced && !cfg.isPastDeadline && !isWithinAlertWindow(config: cfg) {
+            NotificationHistory.record(state:"toast",outcome:"delayed",reason:"Outside the explicitly enabled working-hour restriction",retry:Date().addingTimeInterval(300))
             cliPrint("Discovery saved. Outside the alert window; notifications will resume during working hours."); return
         }
-        if cfg.auto.autoInstallNonSystemUpdates { installNonSystemUpdatesQuietly() }
+        let awareness=loadState()
+        if cfg.auto.autoInstallNonSystemUpdates && awareness.notificationPendingSince == nil && awareness.lastToastShownAt != nil { installNonSystemUpdatesQuietly() }
         runNudgeSchedule(config: cfg)
     }
 
@@ -189,7 +229,19 @@ struct AutoCheckCommand {
         // Re-read config from disk in case OS detection above wrote new
         // target/deadline values. Fall back to the parameter if reload fails.
         let config = (try? loadConfig()) ?? config
-        let state = loadState()
+        var state = loadState()
+        if !sameOSVersion(state.lastToastTarget ?? "",config.update.targetVersion) {state.queueAwareness();try? saveState(state)}
+        guard userIsLoggedIn() else {
+            state.queueAwareness();try? saveState(state)
+            NotificationHistory.record(state:"toast",outcome:"delayed",reason:"No desktop session; awareness remains queued",retry:Date().addingTimeInterval(300))
+            cliPrint("No desktop session: awareness is queued. Deadline preparation can download without installing.")
+            BackgroundPreparation(config:config).run()
+            return
+        }
+        if ReminderDeliveryPolicy.ordinaryAwarenessFirst(pending:state.notificationPendingSince != nil,pastDeadline:config.isPastDeadline,automaticInstall:config.update.autoInstallAfterDeadline || config.update.silentInstallAfterDeadline) {
+            _ = showToast(config:config)
+            return
+        }
 
         cliLog("[AutoCheck] Checking schedule — nextNudge: \(state.nextNudgeDate), nextToast: \(state.nextToastDate)")
 
@@ -220,6 +272,31 @@ struct AutoCheckCommand {
                 return
             }
 
+            switch DeadlineRecoveryController(config:config).review() {
+            case .wait:return
+            case .retry(let automatic,let failureID):
+                guard let live=try? loadConfig(),!live.debug.dryRun,live.auto.enabled,live.isPastDeadline,RetryPolicy.same(live.update.targetVersion,config.update.targetVersion),live.update.deadlineRecoveryEnabled,userIsLoggedIn(),installationIsActive()==false,let pending=try? loadStateForAction(),!pending.installStarted else {cliPrint("Retry deferred: live policy, session or installation safety state changed.");return}
+                if live.ddm.enabled,detectDDMVersion() != nil {cliPrint("Retry deferred to active DDM management.");return}
+                if live.schedule.skipInstallDuringScreenShare && isUserInMeeting() {cliPrint("Retry deferred during a meeting or screen share.");return}
+                if automatic {
+                    guard let failure=try? InstallRecoveryStore.load(),failure.id==failureID,RetryPolicy.automaticAllowed(failure,enabled:live.update.deadlineRecoveryEnabled,pastDeadline:live.isPastDeadline,dryRun:live.debug.dryRun,automaticInstall:live.update.autoInstallAfterDeadline || live.update.silentInstallAfterDeadline,limit:live.update.maxAutomaticRetriesPerDay,now:Date()),RetryPolicy.canRetryNow(failure,automatic:true,now:Date()) else {cliPrint("Automatic retry is no longer eligible.");return}
+                    guard InstallRecoveryStore.update(expectedID:failureID,{record in if record?.id==failureID {record?.automaticAttempts=RetryPolicy.attempts(failure,now:Date())+[Date()];record?.phase="retrying"}}) else{return}
+                }
+                NotificationHistory.record(state:"updateRecovery",outcome:"completed",reason:automatic ? "Recovery countdown became eligible; a guarded automatic retry was requested":"User requested a guarded recovery retry")
+                InstallWorkflow(config:live,skipInitialPrompt:true).run();return
+            case .none:break
+            }
+            if config.update.silentInstallAfterDeadline || config.update.autoInstallAfterDeadline {
+                let shown=showDeadlineNotice(config:config)
+                if !shown && !config.update.silentInstallAfterDeadline {
+                    cliPrint("Deadline enforcement is waiting: the awareness notice could not be displayed. It remains queued for retry.")
+                    return
+                }
+            }
+            guard userIsLoggedIn() else {
+                var queued=loadState();queued.queueAwareness();try? saveState(queued)
+                BackgroundPreparation(config:config).run();return
+            }
             if config.update.silentInstallAfterDeadline {
                 cliLog("[AutoCheck] Deadline passed + silentInstallAfterDeadline=true — silent install")
                 cliPrint("Deadline passed. Running silent install (no UI prompt).")
@@ -258,24 +335,9 @@ struct AutoCheckCommand {
         }
 
         if isForced || state.nextNudgeDate <= Date() {
-            // Lock nextNudgeDate to tomorrow BEFORE showing the nudge.
-            // This prevents concurrent daemon runs from also firing the nudge
-            // while this run is blocking on the popup.
-            var lockState = loadState()
-            lockState.nextNudgeDate = Date().addingTimeInterval(config.nudgeIntervalSeconds)
-            // Schedule next toast for one toast-interval out. Don't use
-            // distantFuture — there's no reliable "nudge closed" hook to reset it.
-            lockState.nextToastDate = Date().addingTimeInterval(config.toastIntervalSeconds)
-            try? saveState(lockState)
-            cliLog("[AutoCheck] Daily nudge due — locked nextNudge to tomorrow")
-
-            showNudge(config: config)
-
-            // After nudge closes, set toast to fire 1 hour from now
-            var s = loadState()
-            s.nextToastDate = Date().addingTimeInterval(config.toastIntervalSeconds)
-            try? saveState(s)
-            cliLog("[AutoCheck] Toast reset to fire in \(formatInterval(Int(config.toastIntervalSeconds)))")
+            // The auto-check lock already prevents duplicate scheduling. Only
+            // advance reminder dates after the window actually returns a response.
+            showNudge(config:config)
         } else if state.nextToastDate <= Date() {
             cliLog("[AutoCheck] Hourly toast due")
             showToast(config: config)
@@ -288,36 +350,42 @@ struct AutoCheckCommand {
 
     // MARK: - Show toast (never counts deferral)
 
-    private func showToast(config: CLIConfig) {
-        // Skip if user is in a meeting or presenting (configurable)
+    @discardableResult private func showToast(config: CLIConfig) -> Bool {
+        guard userIsLoggedIn() else {return false}
         if config.schedule.skipDuringMeetings && isUserInMeeting() {
-            cliLog("[AutoCheck] Meeting/presentation detected — skipping toast, will retry next run")
-            cliPrint("Skipped: user appears to be in a meeting.")
-            return
+            NotificationHistory.record(state:"toast",outcome:"delayed",reason:"Meeting restriction deferred the toast; it remains due",retry:Date().addingTimeInterval(300))
+            cliPrint("Skipped: user appears to be in a meeting. Toast remains due.");return false
         }
-
-        let uiPath = resolveUIBinary()
-        guard FileManager.default.fileExists(atPath: uiPath) else {
-            RuntimeHealthScope.note("The PUSH popup app is missing",error:true); cliLog("[AutoCheck] push-ui not found — skipping toast"); return
+        let uiPath=resolveUIBinary()
+        guard FileManager.default.fileExists(atPath:uiPath),let cfgPath=resolvedConfigPath else {
+            NotificationHistory.record(state:"toast",outcome:"failed",reason:"Popup app or configuration is missing; no delivery was confirmed",retry:Date().addingTimeInterval(300))
+            cliError("The PUSH popup app or configuration is missing. Toast remains due.");return false
         }
-        guard let cfgPath = resolvedConfigPath else { return }
-
-        let state = loadState()
         shell("pkill -x push-ui 2>/dev/null || true")
-        Thread.sleep(forTimeInterval: 0.4)
-
-        // Schedule first, then wait for this specific toast's response.
-        // No shared temporary file can turn a manual test into an install request.
-        var next = loadState()
-        next.nextToastDate = Date().addingTimeInterval(config.toastIntervalSeconds)
-        try? saveState(next)
-        let status = runUIBlocking("\"\(uiPath)\" --state toast --config \"\(cfgPath)\" --deferrals \(state.deferralCount)")
-        cliLog("[AutoCheck] " + popupResultMessage(state: "toast", exitCode: status))
-        if toastRequestedInstall(exitCode: status) {
-            RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
-            InstallWorkflow(config: config, skipInitialPrompt: true).run()
+        Thread.sleep(forTimeInterval:0.4)
+        let status=runUIBlocking(shellArgument(uiPath)+" --state toast --config "+shellArgument(cfgPath)+" --deferrals "+String(loadState().deferralCount))
+        var next=loadState()
+        guard next.recordToastResult(status,interval:config.toastIntervalSeconds,target:config.update.targetVersion) else {
+            cliWarning("Toast was not confirmed displayed. Its due time has not advanced.");return false
         }
-        // Later, close, timeout, and failure do not install or consume a deferral.
+        do {try saveState(next)}catch {cliError("Toast was displayed but its schedule could not be saved.");return false}
+        cliLog("[AutoCheck] "+popupResultMessage(state:"toast",exitCode:status))
+        if toastRequestedInstall(exitCode:status) {
+            RuntimeHealthScope.phase("updating","User requested installation from a live toast")
+            InstallWorkflow(config:config,skipInitialPrompt:true).run()
+        }
+        return true
+    }
+
+    private func showDeadlineNotice(config:CLIConfig)->Bool {
+        var state=loadState()
+        if let shown=state.deadlineNoticeShownAt,sameOSVersion(state.deadlineNoticeTarget ?? "",config.update.targetVersion),Date().timeIntervalSince(shown)<config.toastIntervalSeconds {return true}
+        guard let cfgPath=resolvedConfigPath,FileManager.default.fileExists(atPath:resolveUIBinary()) else {return false}
+        shell("pkill -x push-ui 2>/dev/null || true")
+        let response=runUIBlocking(shellArgument(resolveUIBinary())+" --state toast --deadline-notice --config "+shellArgument(cfgPath),timeoutMinutes:1)
+        guard state.recordToastResult(response,interval:config.toastIntervalSeconds,target:config.update.targetVersion) else {return false}
+        state.deadlineNoticeShownAt=Date();state.deadlineNoticeTarget=config.update.targetVersion
+        do {try saveState(state);return true}catch {cliError("Could not save deadline-notice evidence.");return false}
     }
 
     // MARK: - Show softNudge or hardBlock (Later counts deferral)
@@ -361,6 +429,11 @@ struct AutoCheckCommand {
 
         let status = runUIBlocking("\"\(uiPath)\" --state \(uiState) --config \"\(cfgPath)\" --deferrals \(state.deferralCount)")
 
+        guard [0,1,2,3,100].contains(status) else {
+            cliWarning("Full prompt was not confirmed displayed; reminder dates remain due.");return
+        }
+        state.notificationPendingSince=nil
+        state.nextToastDate=Date().addingTimeInterval(config.toastIntervalSeconds)
         // Default: push next nudge date forward by one nudge interval.
         // The scheduledDefer case below overrides this with the user-chosen date.
         state.nextNudgeDate = Date().addingTimeInterval(config.nudgeIntervalSeconds)
@@ -454,15 +527,6 @@ struct AutoCheckCommand {
     // MARK: - Alert window
 
     func isWithinAlertWindow(config: CLIConfig) -> Bool {
-        let cal     = Calendar.current
-        let now     = Date()
-        let hour    = cal.component(.hour,    from: now)
-        let weekday = cal.component(.weekday, from: now)
-
-        if config.schedule.skipWeekends && (weekday == 1 || weekday == 7) {
-            return false
-        }
-
         // Use schedule.skipOnVPN — suppresses nudge/toast popups on VPN.
         // preflight.skipOnVPN is a separate flag that blocks downloads/installs
         // and must not be conflated with the alert-window decision.
@@ -471,8 +535,7 @@ struct AutoCheckCommand {
             return false
         }
 
-        return hour >= config.schedule.alertStartHour &&
-               hour <  config.schedule.alertEndHour
+        return ReminderDeliveryPolicy.withinHours(restricted:config.schedule.respectAlertWindow,start:config.schedule.alertStartHour,end:config.schedule.alertEndHour,weekdays:config.schedule.skipWeekends,now:Date())
     }
 
     // MARK: - Update detection

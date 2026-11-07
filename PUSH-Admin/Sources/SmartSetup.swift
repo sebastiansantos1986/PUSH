@@ -14,7 +14,7 @@ struct SmartPolicySetupCard: View {
                 Button("Stay on current major") { store.document.followReleases(allowMajorUpgrades: false) }
                 Button("Allow major upgrades") { store.document.followReleases(allowMajorUpgrades: true) }
             }
-            Text("These buttons change the draft only. Your deadline override and other settings are retained. Apply the policy, then enable hourly monitoring in Deployment.")
+            Text("These buttons change the draft only. Your deadline override and other settings are retained. Apply the policy, then enable five-minute monitoring in Deployment.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Deadline priority: explicit YAML update.deadline → automatic deadline from first detection. A generated deadline is stored separately and does not overwrite your override.")
                 .font(.caption).foregroundStyle(.secondary)

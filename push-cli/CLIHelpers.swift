@@ -300,9 +300,11 @@ func consoleUser() -> (name: String, uid: Int)? {
 /// Launch push-ui non-blocking in the console user's GUI session (for toasts/installing).
 func launchUIAsUser(_ cmd: String) {
     guard let user = consoleUser() else {
-        shell("nohup \(cmd) > /dev/null 2>&1 &")
+        NotificationHistory.record(state:NotificationHistoryPolicy.state(in:cmd),outcome:"delayed",reason:"No desktop session for nonblocking notification",retry:Date().addingTimeInterval(300))
+        cliLog("[UI] No console session; notification remains queued")
         return
     }
+    NotificationHistory.record(state:NotificationHistoryPolicy.state(in:cmd),outcome:"requested",reason:"Nonblocking UI launch requested; window appearance is unconfirmed",uid:user.uid)
     cliLog("[UI] Launching as \(user.name) (uid \(user.uid)): \(cmd)")
 
     // Use open(1) to launch the app in the user's GUI session — this is the most
@@ -333,8 +335,10 @@ func launchUIAsUser(_ cmd: String) {
 
 /// Launch push-ui BLOCKING in the console user's GUI session.
 /// Returns the exit code. Times out after timeoutMinutes (default 15).
-func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
-    guard let user = consoleUser() else { return RuntimeHealthScope.uiResult(101) }
+func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15, onDisplayed: (() -> Void)? = nil) -> Int32 {
+    let console=consoleUser()
+    let audit=NotificationAttempt(command:cmd,uid:console?.uid)
+    guard let user=console else{return audit.finish(101)}
     let fm = FileManager.default
     let session = URL(fileURLWithPath:"/private/tmp/push-ui-session-" + UUID().uuidString)
     let ready = session.appendingPathComponent("ready")
@@ -342,11 +346,11 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
     do {
         try fm.createDirectory(at:session,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
         if getuid() == 0 { try fm.setAttributes([.ownerAccountID:NSNumber(value:user.uid)],ofItemAtPath:session.path) }
-        else if getuid() != user.uid { try? fm.removeItem(at:session); return RuntimeHealthScope.uiResult(101) }
-    } catch { return RuntimeHealthScope.uiResult(99) }
+        else if getuid() != user.uid { try? fm.removeItem(at:session); return audit.finish(101) }
+    } catch { return audit.finish(99) }
     defer { try? fm.removeItem(at:session) }
     guard fm.createFile(atPath:log.path,contents:nil,attributes:[.posixPermissions:0o600]),
-          let output = try? FileHandle(forUpdating:log) else { return RuntimeHealthScope.uiResult(99) }
+          let output = try? FileHandle(forUpdating:log) else { return audit.finish(99) }
     defer { try? output.close() }
     let process = Process()
     process.executableURL = URL(fileURLWithPath:"/bin/launchctl")
@@ -354,7 +358,7 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
     process.arguments = ["asuser",String(user.uid),"/usr/bin/sudo","-n","-u",user.name,"--","/bin/zsh","-c","exec " + command]
     process.standardOutput = output; process.standardError = output
     process.standardInput = FileHandle.nullDevice
-    do { try process.run() } catch { cliLog("[UI] Could not start GUI session process: \(error.localizedDescription)"); return RuntimeHealthScope.uiResult(99) }
+    do { try process.run() } catch { cliLog("[UI] Could not start GUI session process: \(error.localizedDescription)"); return audit.finish(99) }
     func diagnostic() {
         // Read the original descriptor, not a user-replaceable pathname.
         guard let size = try? output.seekToEnd() else { return }
@@ -379,15 +383,17 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
     while process.isRunning {
         if !visible && fm.fileExists(atPath:ready.path) {
             visible = true
+            audit.displayed()
+            onDisplayed?()
             RuntimeHealthScope.phase("waitingForUser","Waiting for a response to the visible PUSH prompt")
             cliLog("[UI] Window reported visible in the console session")
         }
         if !visible && Date() >= startup {
             stop(); diagnostic()
             cliLog("[UI] Window did not report visible within 20 seconds")
-            return RuntimeHealthScope.uiResult(103)
+            return audit.finish(103)
         }
-        if Date() >= timeout { stop(); diagnostic(); cliLog("[UI] No user response before timeout"); return RuntimeHealthScope.uiResult(100) }
+        if Date() >= timeout { stop(); diagnostic(); cliLog("[UI] No user response before timeout"); return audit.finish(100) }
         Thread.sleep(forTimeInterval:0.1)
     }
     process.waitUntilExit()
@@ -396,10 +402,11 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
     guard reportedVisible else {
         diagnostic()
         cliLog("[UI] Child exited before reporting a visible window (status \(result))")
-        return RuntimeHealthScope.uiResult(103)
+        return audit.finish(103)
     }
+    if reportedVisible {if !visible {onDisplayed?()};audit.displayed()}
     if result != 0 { diagnostic() }
-    return RuntimeHealthScope.uiResult(result)
+    return audit.finish(result)
 }
 
 // MARK: - push-ui path resolver

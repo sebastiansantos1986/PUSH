@@ -22,7 +22,8 @@ func popupBackgroundOpacity(_ percent: Int, reduceTransparency: Bool = false) ->
 }
 func previewButtonTitle(state: String, code: Int32) -> String {
     switch code {
-    case 0: return state == "entraRegistration" ? "Register Now" : state == "appUpdates" ? "Update Closed Apps" : ["rebootNudge", "rebootForce", "rebooting"].contains(state) ? "Restart Now" : (state == "preflightPower" ? "Power detected" : "Install Now")
+    case 7:return "Automatic recovery retry due"
+    case 0: return state == "updateRecovery" ? "Update now" : state == "entraRegistration" ? "Register Now" : state == "appUpdates" ? "Update Closed Apps" : ["rebootNudge", "rebootForce", "rebooting"].contains(state) ? "Restart Now" : (state == "preflightPower" ? "Power detected" : "Install Now")
     case 1: return "Later"
     case 2: return state == "compliant" ? "Done" : (state == "error" ? "Dismiss" : "Close / Skip")
     case 3: return "Schedule confirmed"

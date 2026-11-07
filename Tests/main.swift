@@ -390,4 +390,167 @@ check(RuntimeHealthScope.clean("Next toast is not due") == "Next toast is not du
 let healthWire = RuntimeHealthRecord(module:"macos",source:"scheduled",startedAt:Date(),updatedAt:Date(),phase:"checking",reason:"Fixture")
 check((try? JSONDecoder().decode(RuntimeHealthRecord.self,from:JSONEncoder().encode(healthWire)))?.source == "scheduled", "health records round-trip without invoking a monitor")
 
+// Around-the-clock reminder and download-only policy fixtures. No live actions.
+var alwaysConfig=CLIConfig.parse(yaml:"schedule:\n  alertStartHour: 8\n  alertEndHour: 18\n  skipWeekends: true\n")
+check(!alwaysConfig.schedule.respectAlertWindow,"preserved hours do not restrict reminders unless explicitly enabled")
+let reminderSaturday=ISO8601DateFormatter().date(from:"2026-11-07T23:00:00Z")!
+var utcHours=Calendar(identifier:.gregorian);utcHours.timeZone=TimeZone(secondsFromGMT:0)!
+check(ReminderDeliveryPolicy.withinHours(restricted:false,start:8,end:18,weekdays:true,now:reminderSaturday,calendar:utcHours),"24/7 reminders allow weekends and evenings")
+check(!ReminderDeliveryPolicy.withinHours(restricted:true,start:8,end:18,weekdays:true,now:reminderSaturday,calendar:utcHours),"optional saved working-hours policy still blocks weekend reminders")
+let weekday=ISO8601DateFormatter().date(from:"2026-11-09T09:00:00Z")!
+check(ReminderDeliveryPolicy.withinHours(restricted:true,start:8,end:18,weekdays:true,now:weekday,calendar:utcHours),"enabled working-hours policy permits eligible weekday session")
+check(!ReminderDeliveryPolicy.withinHours(restricted:true,start:18,end:8,weekdays:false,now:weekday,calendar:utcHours),"invalid restricted hours fail closed")
+let explicitHours=CLIConfig.parse(yaml:"schedule:\n  respectAlertWindow: true\n")
+check(explicitHours.schedule.respectAlertWindow,"YAML can explicitly re-enable saved working hours")
+var queued=CLIDeferralState();queued.nextToastDate=reminderSaturday;queued.queueAwareness(now:reminderSaturday)
+let originalQueue=queued.notificationPendingSince
+queued.queueAwareness(now:reminderSaturday.addingTimeInterval(300))
+check(queued.notificationPendingSince == originalQueue,"repeated logged-out checks retain the original awareness queue")
+for failure:Int32 in [99,101,103,-9,3,4] {
+ check(!queued.recordToastResult(failure,interval:3600,now:weekday) && queued.nextToastDate == reminderSaturday && queued.notificationPendingSince == originalQueue,"failed or mismatched toast result leaves awareness due: \(failure)")
+}
+for response:Int32 in [0,1,2,5,100] {
+ var delivered=queued
+ check(delivered.recordToastResult(response,interval:3600,now:weekday) && delivered.notificationPendingSince == nil && delivered.nextToastDate == weekday.addingTimeInterval(3600) && delivered.lastToastShownAt == weekday,"confirmed visible toast advances only its own interval: \(response)")
+}
+let stateRoundTrip=try JSONDecoder().decode(CLIDeferralState.self,from:JSONEncoder().encode(queued))
+check(stateRoundTrip.notificationPendingSince == reminderSaturday,"queued awareness survives state persistence")
+var overdue=CLIConfig();overdue.debug.dryRun=false;overdue.update.targetVersion="27.2";overdue.update.deadline="2020-01-01T00:00:00Z"
+check(BackgroundPreparation.eligible(config:overdue,loggedIn:false,installPending:false,activity:false),"overdue logged-out Mac can prepare downloads without user authorization prompts")
+check(!BackgroundPreparation.eligible(config:overdue,loggedIn:true,installPending:false,activity:false),"headless preparation does not replace a logged-in workflow")
+check(!BackgroundPreparation.eligible(config:overdue,loggedIn:false,installPending:true,activity:false),"pending reboot verification blocks background preparation")
+check(!BackgroundPreparation.eligible(config:overdue,loggedIn:false,installPending:false,activity:nil),"unknown installer activity blocks background preparation")
+check(!BackgroundPreparation.eligible(config:overdue,loggedIn:false,installPending:false,activity:true),"active installer blocks competing downloads")
+var disabledPreparation=overdue;disabledPreparation.update.prepareAtDeadlineWhenLoggedOut=false
+check(!BackgroundPreparation.eligible(config:disabledPreparation,loggedIn:false,installPending:false,activity:false),"administrator can disable logged-out preparation")
+disabledPreparation=overdue;disabledPreparation.debug.dryRun=true
+check(!BackgroundPreparation.eligible(config:disabledPreparation,loggedIn:false,installPending:false,activity:false),"dry run never enables headless downloads")
+disabledPreparation=overdue;disabledPreparation.update.deadline="2099-01-01T00:00:00Z"
+check(!BackgroundPreparation.eligible(config:disabledPreparation,loggedIn:false,installPending:false,activity:false),"logged-out preparation waits for the actual deadline")
+let nativePlan=PreparationPlan.native(label:"macOS Update-27.2")!
+let fullPlan=PreparationPlan.fullInstaller(target:"27.2")!
+check(nativePlan.arguments == ["--download","macOS Update-27.2","--agree-to-license"],"native preparation plan downloads only")
+check(fullPlan.arguments == ["--fetch-full-installer","--full-installer-version","27.2"],"full preparation plan fetches installer without executing it")
+check([nativePlan,fullPlan].allSatisfy{$0.executable == "/usr/sbin/softwareupdate" && !$0.arguments.contains("--install") && !$0.arguments.contains("--restart") && !$0.arguments.contains("--stdinpass")},"preparation plans contain no OS install, restart, or password arguments")
+check(PreparationPlan.fullInstaller(target:"27.2;reboot") == nil && PreparationPlan.native(label:"--install") == nil,"preparation plans reject invalid targets and option-like labels")
+let migratedWindow=try ConfigCommand.upsertingConfig("schedule:\n  alertStartHour: 8\n  alertEndHour: 18\n  skipWeekends: true\n",key:"schedule.respectAlertWindow",value:"false")
+let migratedPolicy=CLIConfig.parse(yaml:migratedWindow)
+check(!migratedPolicy.schedule.respectAlertWindow && migratedPolicy.schedule.alertStartHour == 8 && migratedPolicy.schedule.skipWeekends,"disabling the alert restriction preserves the saved hours and weekday settings")
+let oldWire=try JSONEncoder().encode(CLIDeferralState())
+var oldDictionary=try JSONSerialization.jsonObject(with:oldWire) as! [String:Any]
+for key in ["lastToastShownAt","notificationPendingSince","deadlineNoticeShownAt"] {oldDictionary.removeValue(forKey:key)}
+let oldDecoded=try JSONDecoder().decode(CLIDeferralState.self,from:JSONSerialization.data(withJSONObject:oldDictionary))
+check(oldDecoded.lastToastShownAt == nil && oldDecoded.notificationPendingSince == nil,"older state files decode without the new awareness fields")
+
+var targetScopedNotice=CLIDeferralState()
+check(targetScopedNotice.recordToastResult(2,interval:3600,now:weekday,target:"27.2") && targetScopedNotice.lastToastTarget == "27.2", "awareness evidence is tied to the target that was actually displayed")
+check(!sameOSVersion(targetScopedNotice.lastToastTarget ?? "","27.3"), "an old target's toast cannot suppress awareness for a newly configured target")
+
+check(ReminderDeliveryPolicy.ordinaryAwarenessFirst(pending:true,pastDeadline:false,automaticInstall:true), "before deadline the first awareness toast is delivered ahead of the full nudge")
+check(ReminderDeliveryPolicy.ordinaryAwarenessFirst(pending:true,pastDeadline:true,automaticInstall:false), "manual deadline policy also receives the queued awareness toast")
+check(!ReminderDeliveryPolicy.ordinaryAwarenessFirst(pending:true,pastDeadline:true,automaticInstall:true), "forced deadline policy uses bounded informational awareness instead of asking for consent")
+check(!ReminderDeliveryPolicy.ordinaryAwarenessFirst(pending:false,pastDeadline:false,automaticInstall:false), "ordinary schedule resumes after queued awareness is confirmed")
+
+// Wallpaper decisions and delivery history are pure fixtures: no desktop is changed.
+check(WallpaperPolicy.action(enabled:false,running:"27.0",target:"27.2") == nil,"wallpaper is opt-in")
+check(WallpaperPolicy.action(enabled:true,running:"27.0",target:"27.2") == "enforce","non-compliant macOS selects continuous enforcement")
+check(WallpaperPolicy.action(enabled:true,running:"27.0",target:"27.2") == WallpaperPolicy.action(enabled:true,running:"27.0",target:"27.2"),"wallpaper decision has no transition-only suppression")
+check(WallpaperPolicy.action(enabled:true,running:"27.2",target:"27.2") == "restore","meeting the configured target ends non-compliant wallpaper enforcement")
+check(WallpaperPolicy.action(enabled:true,running:"27.3",target:"27.2") == "restore","newer running macOS remains compliant")
+check(WallpaperPolicy.action(enabled:true,running:"27.0",target:"") == nil && WallpaperPolicy.action(enabled:true,running:"unknown",target:"27.2") == nil,"unknown compliance never selects a managed background")
+let capturedWallpaper=WallpaperDisplayRecord(priorURL:"/Users/example/Pictures/original.jpg",managedURL:WallpaperPolicy.defaultImage,scaling:0,clipping:false)
+check(WallpaperPolicy.shouldRestore(current:WallpaperPolicy.defaultImage,record:capturedWallpaper),"personal baseline is restored only while managed image is still active")
+check(!WallpaperPolicy.shouldRestore(current:"/Users/example/Pictures/new.jpg",record:capturedWallpaper),"compliant user changes are preserved rather than overwritten")
+let missingBaseline=WallpaperDisplayRecord(priorURL:nil,managedURL:WallpaperPolicy.defaultImage,scaling:nil,clipping:nil)
+check(!WallpaperPolicy.shouldRestore(current:WallpaperPolicy.defaultImage,record:missingBaseline),"missing personal baseline is not invented")
+let wallConfig=CLIConfig.parse(yaml:"compliance:\n  wallpaperEnabled: true\n  nonCompliantWallpaper: \"/Library/Management/PUSH/assets/wallpapers/custom.png\"\n")
+check(wallConfig.compliance.wallpaperEnabled && wallConfig.compliance.nonCompliantWallpaper.hasSuffix("custom.png"),"legacy compliance field names load into native wallpaper policy")
+check(CLIConfig().compliance.compliantWallpaper.isEmpty && !CLIConfig().compliance.wallpaperEnabled,"fresh engine keeps personal restoration and opt-in enforcement")
+let restoredWallpaper=try JSONDecoder().decode(WallpaperUserDocument.self,from:JSONEncoder().encode(WallpaperUserDocument(displays:["fixture":capturedWallpaper])))
+check(restoredWallpaper.displays["fixture"]?.priorURL == capturedWallpaper.priorURL,"per-display baseline persists without macOS installation state")
+check(NotificationHistoryPolicy.state(in:"'/path/push-ui' --state \"softNudge\" --manual-test") == "softNudge","history recognizes quoted UI states")
+check(NotificationHistoryPolicy.result(0,visible:false).0 == "failed","process success without a visible window is never called delivered")
+check(NotificationHistoryPolicy.result(101,visible:false).0 == "delayed","no desktop session is recorded as delayed")
+check(NotificationHistoryPolicy.result(103,visible:false).0 == "failed","startup visibility failure is separate from dismissal")
+check(NotificationHistoryPolicy.result(1,visible:true).1 == "Later selected","explicit Later is preserved in delivery history")
+check(NotificationHistoryPolicy.result(2,visible:true).1 == "Closed or dismissed","closing is separate from Install")
+check(NotificationHistoryPolicy.result(3,visible:true).1.contains("schedule confirmed"),"history distinguishes schedule confirmation")
+check(NotificationHistoryPolicy.result(5,visible:true).0 == "timeout" && NotificationHistoryPolicy.result(100,visible:true).0 == "timeout","toast and controller timeouts remain distinct from user choices")
+check(NotificationHistoryPolicy.result(-9,visible:true).0 == "failed","process signals do not become a user response")
+check(NotificationHistoryPolicy.result(0,visible:true,state:"entraRegistration").1 == "Register Now selected","registration primary choice is not mislabeled Install")
+let fixtureEvent=NotificationHistoryEvent(attempt:"test",date:Date(),state:"toast",mode:"preview",outcome:"displayed",reason:"Fixture",code:nil,userUID:501,target:"27.2",retryAt:nil)
+check(NotificationHistoryPolicy.retaining(Array(repeating:fixtureEvent,count:650)).count==600,"local history is bounded")
+let historyRoundTrip=try JSONDecoder().decode(NotificationHistoryDocument.self,from:JSONEncoder().encode(NotificationHistoryDocument(events:[fixtureEvent])))
+check(historyRoundTrip.events.first?.mode == "preview","manual previews stay distinguishable from live delivery")
+let digestFixture=String(repeating:"a",count:64)
+check(WallpaperPolicy.assetName(digest:digestFixture,role:"noncompliant") == "noncompliant-"+digestFixture+".png","managed asset names are content-addressed")
+check(WallpaperPolicy.assetName(digest:"../private",role:"noncompliant") == nil && WallpaperPolicy.assetName(digest:digestFixture,role:"../") == nil,"wallpaper names reject traversal and unsupported roles")
+
+check(NotificationHistoryPolicy.result(0,visible:true,state:"preflightPower").0 == "completed", "power detection is not invented as user installation consent")
+check(NotificationHistoryPolicy.result(0,visible:true,state:"rebootForce").0 == "completed", "restart countdown completion is not invented as a button click")
+
+// Deadline recovery fixtures. No installer, UI, requests to the real channel, or reboot.
+let retryNow=Date()
+var recoveryFixture=InstallRecoveryRecord(target:"27.2",reason:"Network unavailable",kind:.network,failedAt:retryNow)
+check(RecoveryFailureKind.classify("Valid authorization is required before installing macOS") == .authorization,"authorization failures do not enter a pretend download-retry loop")
+check(!RecoveryFailureKind.authorization.allowsAutomaticRetry && !RecoveryFailureKind.verification.allowsAutomaticRetry && !RecoveryFailureKind.state.allowsAutomaticRetry,"IT-only blockers cannot get an automatic bypass countdown")
+check(RecoveryFailureKind.power.allowsAutomaticRetry && RecoveryFailureKind.download.allowsAutomaticRetry,"temporary power and download problems can be rechecked automatically")
+check(RetryPolicy.automaticAllowed(recoveryFixture,enabled:true,pastDeadline:true,dryRun:false,automaticInstall:true,limit:3,now:retryNow),"temporary failure can retry only under enabled live deadline policy")
+for condition in 0..<4 {
+ check(!RetryPolicy.automaticAllowed(recoveryFixture,enabled:condition != 0,pastDeadline:condition != 1,dryRun:condition == 2,automaticInstall:condition != 3,limit:3,now:retryNow),"recovery cannot bypass disabled policy, future deadline, dry-run or manual installation mode: \(condition)")
+}
+check(RetryPolicy.nextTime(recoveryFixture,countdownMinutes:10,backoffMinutes:30,now:retryNow)==retryNow.addingTimeInterval(600),"first recovery countdown defaults to ten minutes")
+recoveryFixture.automaticAttempts=[retryNow.addingTimeInterval(-60)]
+check(RetryPolicy.nextTime(recoveryFixture,countdownMinutes:10,backoffMinutes:30,now:retryNow)==retryNow.addingTimeInterval(1740),"subsequent automatic attempts retain minimum spacing")
+recoveryFixture.automaticAttempts=[retryNow.addingTimeInterval(-100),retryNow.addingTimeInterval(-200),retryNow.addingTimeInterval(-300)]
+check(!RetryPolicy.automaticAllowed(recoveryFixture,enabled:true,pastDeadline:true,dryRun:false,automaticInstall:true,limit:3,now:retryNow),"rolling attempt budget stops repetitive automatic retries")
+recoveryFixture.automaticAttempts=[retryNow.addingTimeInterval(-90000)]
+check(RetryPolicy.attempts(recoveryFixture,now:retryNow).isEmpty,"old retry attempts age out of the rolling budget")
+recoveryFixture.retryAt=retryNow.addingTimeInterval(10);recoveryFixture.noticeShownAt=retryNow
+check(!RetryPolicy.canRetryNow(recoveryFixture,automatic:true,now:retryNow),"a UI signal cannot trigger an automatic retry before the saved deadline")
+check(RetryPolicy.canRetryNow(recoveryFixture,automatic:true,now:retryNow.addingTimeInterval(10)),"automatic retry becomes eligible at the saved absolute time")
+recoveryFixture.noticeShownAt=nil
+check(!RetryPolicy.canRetryNow(recoveryFixture,automatic:true,now:retryNow.addingTimeInterval(20)),"a clock without a displayed recovery notice cannot silently become user awareness")
+check(RetryPolicy.canRetryNow(recoveryFixture,automatic:false,now:retryNow),"explicit Update now does not wait for the automatic clock")
+let recoveryNotice=RecoveryNotice(target:"27.2",reason:"Fixture",retryAt:retryNow.addingTimeInterval(0.5),automatic:true,explanation:"Fixture only")
+check(recoveryNotice.remaining(at:retryNow)==1 && !recoveryNotice.countdownDue(at:retryNow),"sub-second countdown rounding cannot make the UI fire early")
+check(recoveryNotice.countdownDue(at:retryNow.addingTimeInterval(0.5)),"UI countdown uses the real absolute retry time")
+let noticePayload=try JSONEncoder().encode(recoveryNotice).base64EncodedString()
+check(RecoveryNotice.decode(noticePayload)?.target=="27.2","recovery notice payload round-trips without command content")
+let noTimeNotice=RecoveryNotice(target:"27.2",reason:"Fixture",retryAt:nil,automatic:true,explanation:"Fixture")
+let missingTimePayload=try JSONEncoder().encode(noTimeNotice).base64EncodedString()
+check(RecoveryNotice.decode(missingTimePayload) == nil,"automatic recovery notice requires an actual retry time")
+var requestFixture=UserUpdateRequest(userUID:Int(getuid()),target:"27.2",action:.install,issuedAt:retryNow)
+check(UserUpdateRequest.valid(requestFixture,owner:Int(getuid()),target:"27.2.0",now:retryNow),"user update requests are version-bound with numeric equivalence")
+check(!UserUpdateRequest.valid(requestFixture,owner:Int(getuid())+1,target:"27.2",now:retryNow),"request body cannot impersonate another console owner")
+check(!UserUpdateRequest.valid(requestFixture,owner:Int(getuid()),target:"27.3",now:retryNow),"a stale target request cannot install a newly discovered version")
+check(!UserUpdateRequest.valid(requestFixture,owner:Int(getuid()),target:"27.2",now:retryNow.addingTimeInterval(901)),"old user requests expire")
+requestFixture.issuedAt=retryNow.addingTimeInterval(61)
+check(!UserUpdateRequest.valid(requestFixture,owner:Int(getuid()),target:"27.2",now:retryNow),"future-dated user requests do not extend validity")
+let privateRequestFolder=root.appendingPathComponent("request-fixture")
+try FileManager.default.createDirectory(at:privateRequestFolder,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+requestFixture.issuedAt=retryNow
+let privateRequestFile=privateRequestFolder.appendingPathComponent("request.json")
+try JSONEncoder().encode(requestFixture).write(to:privateRequestFile)
+try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:privateRequestFile.path)
+let consumedRequest=try UserRequestChannel.consume(uid:Int(getuid()),folder:privateRequestFolder)
+check(consumedRequest?.id==requestFixture.id && !FileManager.default.fileExists(atPath:privateRequestFile.path),"descriptor-based request channel consumes only its fixed, owned file")
+try FileManager.default.createSymbolicLink(at:privateRequestFile,withDestinationURL:root.appendingPathComponent("state.json"))
+var rejectedLink=false
+do {_ = try UserRequestChannel.consume(uid:Int(getuid()),folder:privateRequestFolder)}catch{rejectedLink=true}
+check(rejectedLink,"request channel refuses symlinks rather than following user-selected paths")
+try FileManager.default.removeItem(at:privateRequestFile)
+try JSONEncoder().encode(requestFixture).write(to:privateRequestFile)
+try FileManager.default.setAttributes([.posixPermissions:0o644],ofItemAtPath:privateRequestFile.path)
+var rejectedPublic=false
+do {_ = try UserRequestChannel.consume(uid:Int(getuid()),folder:privateRequestFolder)}catch{rejectedPublic=true}
+check(rejectedPublic,"request channel requires private request permissions")
+check(UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:false,requestsEnabled:true,pending:false,monitor:true,target:"27.2",running:"27.0"),"status menu permits only a live eligible configured target request")
+check(!UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:false,requestsEnabled:true,pending:true,monitor:true,target:"27.2",running:"27.0"),"status menu does not offer duplicate installation while verification is pending")
+check(!UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:false,requestsEnabled:true,pending:false,monitor:nil,target:"27.2",running:"27.0"),"unknown monitor state never becomes an available update service")
+check(!UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:false,requestsEnabled:true,pending:false,monitor:true,target:"27.2",running:"27.2"),"compliant status does not request unnecessary updates")
+check(NotificationHistoryPolicy.result(7,visible:true,state:"updateRecovery").0=="completed","automatic recovery expiry stays separate from a user Update choice")
+let recoveryDefaults=CLIConfig.parse(yaml:"update:\n  deadlineRecoveryEnabled: true\n  retryCountdownMinutes: 12\nui:\n  menuBarEnabled: false\n")
+check(recoveryDefaults.update.retryCountdownMinutes==12 && !recoveryDefaults.ui.menuBarEnabled,"recovery and menu policy are configurable in preserved YAML")
+
 print("Passed \(count) safe regression checks. No macOS installation commands were executed.")

@@ -74,6 +74,23 @@ func appleScriptQuote(_ value: String) -> String { "\"" + value.replacingOccurre
 
 @MainActor
 final class AdminStore: ObservableObject {
+    @Published var setupProgress = SetupWizardProgress() {didSet {saveSetupProgress()}}
+    var setupProgressURL: URL {draftURL.deletingLastPathComponent().appendingPathComponent("setup-progress.json")}
+    private func saveSetupProgress() {
+        do {
+            let folder=setupProgressURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            try JSONEncoder().encode(setupProgress).write(to:setupProgressURL,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:setupProgressURL.path)
+        } catch {notice="Setup progress could not be saved. Your configuration draft is saved separately; export it before closing."}
+    }
+    func importInstalledForSetup() {
+        let alert=NSAlert();alert.messageText="Replace this draft with installed YAML?"
+        alert.informativeText="Export your current draft first if you want to keep it. The installed file will only be read, and known plaintext credential fields will be omitted from the draft."
+        alert.addButton(withTitle:"Import Installed YAML");alert.addButton(withTitle:"Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {importDocument(URL(fileURLWithPath:livePath))}
+    }
+
     @Published var readiness: ReadinessSnapshot?
     @Published var isRefreshingReadiness = false
     func refreshReadiness() async {
@@ -93,8 +110,10 @@ final class AdminStore: ObservableObject {
     @Published var catalogIsCached = false
     @Published var notice = ""
     @Published var busy = false
+    @Published var isBuildingDeployment = false
     @Published var buttonChecks: [PopupButtonCheck] = []
     func recordButtonCheck(state:String, action:String, code:Int32?, automatic:Bool) {
+        setupProgress.record(document:document,state:state,code:code,automatic:automatic)
         buttonChecks.insert(PopupButtonCheck(state:state,action:action,exitCode:code,automatic:automatic),at:0)
         if buttonChecks.count > 100 { buttonChecks.removeLast(buttonChecks.count-100) }
     }
@@ -134,6 +153,13 @@ final class AdminStore: ObservableObject {
            (attributes[.size] as? NSNumber)?.intValue ?? 0 < 6_291_456,
            let data = try? Data(contentsOf:draftURL), let restored = try? JSONDecoder().decode(ConfigDocument.self,from:data) {
             document = restored
+        }
+        if let attributes=try? FileManager.default.attributesOfItem(atPath:setupProgressURL.path),
+           (attributes[.size] as? NSNumber)?.intValue ?? 0 < 262_144,
+           let bytes=try? Data(contentsOf:setupProgressURL),let restored=try? JSONDecoder().decode(SetupWizardProgress.self,from:bytes) {
+            var bounded=restored
+            bounded.previewEvents=Array(restored.previewEvents.suffix(100))
+            setupProgress=bounded
         }
         if let data = try? Data(contentsOf:cacheURL), let cache = try? JSONSerialization.jsonObject(with:data) as? [String:Any], let time = cache["checkedAt"] as? Double,
            let records = cache["releases"], let recordsData = try? JSONSerialization.data(withJSONObject:records), let saved = try? CatalogRelease.parse(recordsData) {
@@ -195,6 +221,7 @@ final class AdminStore: ObservableObject {
                     }
                     try data.write(to:image,options:.atomic)
                 }
+                _ = try stageWallpaperFiles(in:url.deletingLastPathComponent())
                 try document.yaml.write(to:url,atomically:true,encoding:.utf8)
                 notice = attachedLogo ? "Saved YAML and popup-logo.png. Deploy the PNG to " + deployedPopupLogoPath : "Saved \(url.lastPathComponent). No settings were applied to this Mac."
             } catch { notice = "Save failed: " + error.localizedDescription }
@@ -204,7 +231,7 @@ final class AdminStore: ObservableObject {
     func confirmApply() {
         guard pushInstalled, document.problems.isEmpty else { notice = "Install PUSH and resolve configuration issues before applying."; return }
         let alert = NSAlert(); alert.messageText = "Apply this configuration to this Mac?"
-        alert.informativeText = "The current config will be backed up. Future scheduled PUSH checks will use this policy. This does not start a check or an upgrade.\n\nDry run: \(document.value("debug.dryRun") ?? "true")\nAutomatic deadline install: \(document.value("update.autoInstallAfterDeadline") ?? "false")\nSilent deadline install: \(document.value("update.silentInstallAfterDeadline") ?? "false")\nDeadline override: \(document.value("update.deadline").flatMap { $0.isEmpty ? nil : $0 } ?? "Automatic from first detection")\nEntra reminders: \(document.value("entra.enabled") ?? "false")\nSelf Service policy: \(document.value("entra.policyID") ?? "876")\nApp management: \(document.value("apps.enabled") ?? "false")\nApproved apps: \(document.value("apps.approved") ?? "None")\nQuiet closed-app updates: \(document.value("apps.autoUpdateClosed") ?? "false")\nPlaintext credentials are excluded from this draft. A selected custom logo will also be installed and its previous image backed up."
+        alert.informativeText = "The current config will be backed up. Future scheduled PUSH checks will use this policy. This does not start a check or an upgrade.\n\nDry run: \(document.value("debug.dryRun") ?? "true")\nAutomatic deadline install: \(document.value("update.autoInstallAfterDeadline") ?? "false")\nSilent deadline install: \(document.value("update.silentInstallAfterDeadline") ?? "false")\nDeadline override: \(document.value("update.deadline").flatMap { $0.isEmpty ? nil : $0 } ?? "Automatic from first detection")\nEntra reminders: \(document.value("entra.enabled") ?? "false")\nSelf Service policy: \(document.value("entra.policyID") ?? "876")\nApp management: \(document.value("apps.enabled") ?? "false")\nApproved apps: \(document.value("apps.approved") ?? "None")\nQuiet closed-app updates: \(document.value("apps.autoUpdateClosed") ?? "false")\nPlaintext credentials are excluded from this draft. Selected wallpaper assets are staged in protected managed storage. A selected custom logo will also be installed and its previous image backed up."
         alert.addButton(withTitle:"Apply Configuration"); alert.addButton(withTitle:"Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
@@ -229,6 +256,24 @@ final class AdminStore: ObservableObject {
                 /bin/mv -f "$imagefile" "$base/assets/popup-logo.png"
                 """
             }
+            let wallpapers=try stageWallpaperFiles(in:directory)
+            var wallpaperInstall=""
+            if !wallpapers.isEmpty {
+                wallpaperInstall="""
+                /bin/mkdir -p "$base/assets"
+                [ ! -L "$base/assets" ] && [ "$(/usr/bin/stat -f %u "$base/assets")" = 0 ] || exit 1
+                /bin/chmod 755 "$base/assets"
+                /bin/mkdir -p "$base/assets/wallpapers"
+                [ ! -L "$base/assets/wallpapers" ] && [ "$(/usr/bin/stat -f %u "$base/assets/wallpapers")" = 0 ] || exit 1
+                /bin/chmod 755 "$base/assets/wallpapers"
+                """
+                for wallpaper in wallpapers {
+                    wallpaperInstall += "\n[ -f " + shellQuote(wallpaper.url.path) + " ] && [ ! -L " + shellQuote(wallpaper.url.path) + " ] || exit 1\n"
+                    wallpaperInstall += "asset=$(/usr/bin/mktemp \"$base/assets/wallpapers/.stage.XXXXXX\")\n"
+                    wallpaperInstall += "/usr/bin/install -m 644 -o root -g wheel " + shellQuote(wallpaper.url.path) + " \"$asset\"\n"
+                    wallpaperInstall += "/bin/mv -f \"$asset\" \"$base/assets/wallpapers/" + wallpaper.fileName + "\"\n"
+                }
+            }
             let command = """
             set -eu
             base=/Library/Management/PUSH
@@ -239,6 +284,7 @@ final class AdminStore: ObservableObject {
             /bin/chmod 700 "$base/config-backups"
             if [ -e "$base/config.yaml" ]; then /bin/cp -p "$base/config.yaml" "$base/config-backups/config-$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$.yaml"; fi
             \(imageInstall)
+            \(wallpaperInstall)
             newfile=$(/usr/bin/mktemp "$base/.admin-config.XXXXXX")
             trap '/bin/rm -f "$newfile"' EXIT
             /usr/bin/install -m 644 -o root -g wheel \(shellQuote(staged.path)) "$newfile"
@@ -263,7 +309,7 @@ final class AdminStore: ObservableObject {
         alert.addButton(withTitle:enable ? "Enable Schedule" : "Pause Schedule"); alert.addButton(withTitle:"Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            try authorize("/Library/Management/PUSH/push-cli " + (enable ? "install-daemon --interval 1h" : "uninstall-daemon"))
+            try authorize("/Library/Management/PUSH/push-cli " + (enable ? "install-daemon --interval 5m" : "uninstall-daemon"))
             objectWillChange.send(); notice = enable ? (dry ? "Dry-run monitoring enabled." : "Live monitoring enabled using the installed policy.") : "Automatic scheduling paused."
         } catch { notice = error.localizedDescription }
     }

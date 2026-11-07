@@ -10,5 +10,5 @@ for source in push-cli/*.swift; do
     [[ "$source" == push-cli/main.swift ]] || sources+=("$source")
 done
 xcrun swiftc -swift-version 5 -module-cache-path "$test_dir/modules" \
-    Shared/SecureSupport.swift "${sources[@]}" Tests/main.swift -o "$test_dir/tests"
+    Shared/SecureSupport.swift Shared/VisualPolicy.swift Shared/RecoveryPolicy.swift Shared/UserRequestChannel.swift "${sources[@]}" Tests/main.swift -o "$test_dir/tests"
 "$test_dir/tests"

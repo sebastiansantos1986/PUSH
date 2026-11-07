@@ -7,6 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        STATUSUI = {isa = PBXBuildFile; fileRef = STATUSF1; };
+        STATUSCF = {isa = PBXBuildFile; fileRef = F203; };
+        RECUI01 = {isa = PBXBuildFile; fileRef = RECV001; };
+        RECUI02 = {isa = PBXBuildFile; fileRef = RECV001; };
+        RECSTR1 = {isa = PBXBuildFile; fileRef = RECF001; };
+        URQSTR1 = {isa = PBXBuildFile; fileRef = URQF001; };
+        RSHUI01 = {isa = PBXBuildFile; fileRef = RSHF001; };
+        RSHCL01 = {isa = PBXBuildFile; fileRef = RSHF001; };
+        RSHPV01 = {isa = PBXBuildFile; fileRef = RSHF001; };
+        USHUI01 = {isa = PBXBuildFile; fileRef = USHF001; };
+        USHCL01 = {isa = PBXBuildFile; fileRef = USHF001; };
+        USHPV01 = {isa = PBXBuildFile; fileRef = USHF001; };
+        WCMD01 = {isa = PBXBuildFile; fileRef = WCMDF1; };
+        VCLI001 = {isa = PBXBuildFile; fileRef = VSHARED; };
+        VUI0001 = {isa = PBXBuildFile; fileRef = VSHARED; };
+        VPREV01 = {isa = PBXBuildFile; fileRef = VSHARED; };
+        NHIST01 = {isa = PBXBuildFile; fileRef = FHIST01; };
+        WALLC01 = {isa = PBXBuildFile; fileRef = WALLF01; };
+        WALLU01 = {isa = PBXBuildFile; fileRef = WALLUF1; };
+        UBACK001 = {isa = PBXBuildFile; fileRef = FBACK001; };
         UHEALTH1 /* RuntimeHealth.swift in Sources */ = {isa = PBXBuildFile; fileRef = FHEALTH1 /* RuntimeHealth.swift */; };
         UENT001 /* EntraNudge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FENT001 /* EntraNudge.swift */; };
         UAPP001 /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAPP001 /* AppUpdates.swift */; };
@@ -56,6 +76,18 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        STATUSF1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarApp.swift; sourceTree = "<group>"; };
+        RECV001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryView.swift; sourceTree = "<group>"; };
+        RECF001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallRecovery.swift; sourceTree = "<group>"; };
+        URQF001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserRequests.swift; sourceTree = "<group>"; };
+        RSHF001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/RecoveryPolicy.swift; sourceTree = SOURCE_ROOT; };
+        USHF001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/UserRequestChannel.swift; sourceTree = SOURCE_ROOT; };
+        WCMDF1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCommand.swift; sourceTree = "<group>"; };
+        VSHARED = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/VisualPolicy.swift; sourceTree = SOURCE_ROOT; };
+        FHIST01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationHistory.swift; sourceTree = "<group>"; };
+        WALLF01 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperEnforcement.swift; sourceTree = "<group>"; };
+        WALLUF1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperHelper.swift; sourceTree = "<group>"; };
+        FBACK001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPreparation.swift; sourceTree = "<group>"; };
         FHEALTH1 /* RuntimeHealth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeHealth.swift; sourceTree = "<group>"; };
         FENT001 /* EntraNudge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntraNudge.swift; sourceTree = "<group>"; };
         FAPP001 /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
@@ -154,6 +186,8 @@
                 FAPP001 /* AppUpdates.swift */,
                 FENT001 /* EntraNudge.swift */,
                 FHEALTH1 /* RuntimeHealth.swift */,
+                FBACK001,
+                FHIST01, WALLF01, WCMDF1, RECF001, URQF001,
 				F219 /* MDMCommand.swift */,
 				F220 /* AuthCommand.swift */,
 			);
@@ -182,6 +216,7 @@
 			isa = PBXGroup;
 			children = (
                 SS00,
+                VSHARED, RSHF001, USHF001,
 				GRP_UI /* push-ui */,
 				GRP_CLI /* push-cli */,
 				GRP_PREVIEW /* PreviewHost */,
@@ -199,6 +234,7 @@
 				F104 /* SharedComponents.swift */,
 				F105 /* PopupViews.swift */,
 				F106 /* InstallAssistant.icns */,
+                WALLUF1, RECV001, STATUSF1,
 			);
 			path = "push-ui";
 			sourceTree = "<group>";
@@ -344,6 +380,8 @@
 			buildActionMask = 2147483647;
 			files = (
                 SS01,
+                VUI0001, STATUSUI, STATUSCF, RECUI01, RSHUI01, USHUI01,
+                WALLU01,
 				U101 /* main.swift in Sources */,
 				U102 /* UIConfig.swift in Sources */,
 				U103 /* UIState.swift in Sources */,
@@ -359,6 +397,7 @@
 			files = (
                 IS01,
                 SS02,
+                VCLI001, RECSTR1, URQSTR1, RSHCL01, USHCL01,
 				U201 /* main.swift in Sources */,
 				U202 /* CLIHelpers.swift in Sources */,
 				U203 /* CLIConfig.swift in Sources */,
@@ -383,6 +422,8 @@
                 UAPP001 /* AppUpdates.swift in Sources */,
                 UENT001 /* EntraNudge.swift in Sources */,
                 UHEALTH1 /* RuntimeHealth.swift in Sources */,
+                UBACK001,
+                NHIST01, WALLC01, WCMD01,
 				U219 /* MDMCommand.swift in Sources */,
 				D0F7DEE82FA2B7140098C495 /* UserPasswordKeychain.swift in Sources */,
 				U220 /* AuthCommand.swift in Sources */,
@@ -394,6 +435,7 @@
 			buildActionMask = 2147483647;
 			files = (
                 SS03,
+                VPREV01, RECUI02, RSHPV01, USHPV01,
 				U301 /* PreviewApp.swift in Sources */,
 				U302 /* UIConfig.swift in Sources */,
 				U303 /* UIState.swift in Sources */,
@@ -410,8 +452,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -423,8 +465,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -436,8 +478,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -452,8 +494,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -490,8 +532,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
@@ -508,8 +550,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.6.0;
-                CURRENT_PROJECT_VERSION = 160;
+                MARKETING_VERSION = 1.9.1;
+                CURRENT_PROJECT_VERSION = 191;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
