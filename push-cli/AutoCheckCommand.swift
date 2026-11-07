@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: AutoCheckCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // AutoCheckCommand.swift — Update detection and nudge scheduling
 //
 // Schedule:
@@ -9,11 +19,15 @@
 // Test overrides: debug.testToastIntervalMinutes / testNudgeIntervalMinutes
 
 import Foundation
+import Darwin
 
 struct AutoCheckCommand {
     let args: [String]
     var isDryRun: Bool { args.contains("--dry-run") }
-    var isForced: Bool { args.contains("--force") }
+    var checkOnly: Bool { args.contains("--check-only") }
+    var notifyOnly: Bool { args.contains("--notify-only") }
+    var installNow: Bool { args.contains("--install-now") }
+    var isForced: Bool { args.contains("--force") || checkOnly || notifyOnly || installNow }
 
     struct DetectedUpdate {
         let version: String
@@ -23,301 +37,150 @@ struct AutoCheckCommand {
     }
 
     func run() {
-        cliLog("[AutoCheck] Starting (dry-run:\(isDryRun) force:\(isForced))")
-
-        // Rotate log if needed
-        if let cfg = try? loadConfig() {
-            LogRotation.rotateIfNeeded(config: cfg)
+        if isDryRun {
+            cliPrint("Dry run: would discover updates and evaluate policy. No state changes, prompts, downloads, installation, or restart.")
+            return
         }
-
-        guard let config = try? loadConfig() else {
-            cliError("Cannot load config. Run: push-cli config show")
-            exit(1)
+        guard let config = try? loadConfig() else { cliError("Cannot load config. Run: push-cli config show"); return }
+        if config.debug.dryRun {
+            cliPrint("Dry run: would discover updates and evaluate policy. No state changes, prompts, downloads, installation, or restart.")
+            return
         }
-
-        guard config.auto.enabled else {
-            cliPrint("Auto-detection disabled (auto.enabled: false).")
-            exit(0)
+        guard [checkOnly, notifyOnly, installNow].filter({ $0 }).count <= 1 else {
+            cliError("Choose exactly one action: check, notify, or install."); return
         }
-
-        // Guard: if no user is logged in and targetVersion is already set,
-        // skip entirely — cannot show UI and no detection needed
-        if !userIsLoggedIn() && !config.update.targetVersion.isEmpty {
-            cliLog("[AutoCheck] No console user — skipping nudge schedule (install started: \(loadState().installStarted))")
-            // Still run silent install if past deadline and configured
-            if config.isPastDeadline && config.update.silentInstallAfterDeadline {
-                cliLog("[AutoCheck] Silent install triggered (no user, past deadline)")
-                InstallWorkflow(config: config, skipInitialPrompt: true).run()
-            }
-            exit(0)
+        guard getuid() == 0 else { cliError("Run this command with sudo to save discovery results."); return }
+        guard config.auto.enabled || isForced else { cliPrint("Auto-detection is disabled."); return }
+        let audit = RuntimeHealthScope(module:"macos",scheduled:args.contains("--scheduled"))
+        defer { audit.finish() }
+        guard config.update.deadline.isEmpty || ISO8601DateFormatter().date(from: config.effectiveDeadline) != nil else {
+            cliError("update.deadline must include an ISO 8601 date, time, and time zone."); return
         }
+        try? FileManager.default.createDirectory(atPath: managedBase, withIntermediateDirectories: true)
+        let lock = open(managedBase + "/auto-check.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+        guard lock >= 0 else { cliError("Cannot open discovery lock."); return }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { cliPrint("Another PUSH check is running; no duplicate action started."); return }
+        defer { flock(lock, LOCK_UN) }
+        LogRotation.rotateIfNeeded(config: config)
+        cliLog("[AutoCheck] Starting checkOnly:\(checkOnly) notifyOnly:\(notifyOnly) installNow:\(installNow) force:\(isForced)")
 
         let current = currentMacOSVersion()
-
-        // Wallpaper is passive compliance signaling, not a nudge. Non-compliant
-        // Macs get PUSH's non-compliant background; compliant Macs only switch
-        // back if PUSH's non-compliant background is still set.
-        if !isDryRun {
-            let wallpaper = WallpaperManager(config: config)
-            switch WallpaperManager.currentDesiredState(config: config) {
-            case .nonCompliant:
-                wallpaper.applyIfStateChanged(.nonCompliant)
-            case .compliant:
-                wallpaper.applyCompliantIfReplacingNonCompliant()
-            }
+        guard var health = try? loadStateForAction() else {
+            cliError("Saved installation state is unreadable. Restore its backup before running update actions."); return
         }
-
-        // Alert window check — skip outside business hours / weekends
-        if !isDryRun && !isForced && !isWithinAlertWindow(config: config) {
-            cliLog("[AutoCheck] Outside alert window — skipping nudge")
-            cliPrint("Outside alert window (\(config.schedule.alertStartHour):00–\(config.schedule.alertEndHour):00). Will retry next run.")
-            exit(0)
-        }
-
-        cliSection("🔍 Checking for macOS updates")
-        cliInfo("Current macOS:", current)
-        cliInfo("Config target:", config.update.targetVersion.isEmpty ? "(not set)" : config.update.targetVersion)
-
-        // Auto-install non-system updates silently in the background.
-        // These (Safari, XProtect, MRT, command-line tools) don't require
-        // reboots and don't block the user. Doing them on every auto-check
-        // means the user sees them appear-and-disappear instead of bundling
-        // them into a reboot-time install. We DO NOT block on this — the
-        // result is logged but doesn't affect the rest of auto-check.
-        if config.auto.autoInstallNonSystemUpdates && !isDryRun {
-            installNonSystemUpdatesQuietly()
-        }
-
-        // Step aside if DDM is managing this
-        if config.ddm.enabled, let ddmVer = detectDDMVersion() {
-            cliInfo("DDM detected:", ddmVer)
-            cliPrint("Apple DDM is managing this update. PUSH will step aside.")
-            cliLog("[AutoCheck] DDM active for \(ddmVer) — exiting")
-            exit(0)
-        }
-
-        // ── Enforcement logic ──────────────────────────────────────────────────
-        // If enforceMinimumMajorVersion is set (e.g. 26), check the current
-        // machine's major version against it. This handles two scenarios:
-        //
-        //   Machine on 15.x → needs major upgrade to 26 → releaseType = major
-        //   Machine on 26.x → may need a minor security update → releaseType = minor
-        //
-        // This means you set one config and PUSH does the right thing on every Mac.
-
-        let currentMajorInt = Int(current.split(separator: ".").first ?? "0") ?? 0
-        let enforcedMajor   = config.auto.enforceMinimumMajorVersion
-
-        // Already compliant check
-        if !config.update.targetVersion.isEmpty &&
-            versionGTE(current, config.update.targetVersion) {
-            // Also verify major version enforcement
-            if enforcedMajor > 0 && currentMajorInt < enforcedMajor {
-                cliInfo("Major version enforcement:", "Running \(current) but need major \(enforcedMajor).x")
-                // Fall through to detection below
-            } else {
-                cliSuccess("Already compliant — running \(current), target \(config.update.targetVersion)")
-                cliLog("[AutoCheck] Already compliant")
-
-                // If install was previously started (pre-reboot state), this is the
-                // first run after a successful upgrade. Mark complete + run recon.
-                var state = loadState()
-                if state.installStarted && !state.installCompleted {
-                    state.installCompleted = true
-                    state.installStarted   = false
-                    try? saveState(state)
-                    cliLog("[AutoCheck] Post-upgrade first run — marking install complete")
-                    NotificationManager(config: config).notifyInstallComplete(
-                        version: current,
-                        previousVersion: state.lastSeenVersion
-                    )
-                    // Trigger recon so Jamf EA updates immediately instead of waiting
-                    if !config.jamf.binaryPath.isEmpty,
-                       FileManager.default.fileExists(atPath: config.jamf.binaryPath) {
-                        cliLog("[AutoCheck] Running jamf recon post-upgrade")
-                        shell("\"\(config.jamf.binaryPath)\" recon 2>/dev/null")
-                        cliSuccess("Jamf inventory updated")
-                    }
+        let oldState = health
+        let activity = installationIsActive()
+        if let recovery = health.recoverInstallation(running: current, boot: currentBootTimestamp(),
+            target: config.update.targetVersion, active: activity) {
+            do { try saveState(health); cliPrint(recovery) }
+            catch { cliError("Could not save recovered installation state; no new action started."); return }
+            if !checkOnly && health.installCompleted && !oldState.installCompleted {
+                NotificationManager(config: config).notifyInstallComplete(version: current, previousVersion: oldState.lastSeenVersion)
+                if FileManager.default.isExecutableFile(atPath: config.jamf.binaryPath) {
+                    _ = runDirect(config.jamf.binaryPath, ["recon"])
                 }
-                WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
-                runUptimeCheckIfAllowed(config: config)
-                exit(0)
             }
         }
-
-        // Poll softwareupdate
-        cliPrint("\nPolling Apple Software Update…")
+        guard activity == false else {
+            cliPrint("An installer or update process is active, or its activity cannot be verified. No competing action was started."); return
+        }
+        guard !health.installStarted else {
+            cliPrint("An installation is awaiting reboot verification; no duplicate installation or new target will be scheduled."); return
+        }
+        if config.ddm.enabled, let version = detectDDMVersion(), !checkOnly {
+            cliPrint("Apple DDM is managing macOS \(version). PUSH will step aside."); return
+        }
+        cliSection("Checking for macOS updates")
+        cliInfo("Current macOS:", current)
         let available = detectAvailableUpdates(config: config)
-
-        // If enforceMinimumMajorVersion is set and the machine is below that major,
-        // synthesize a major upgrade target even if softwareupdate doesn't list it yet.
-        if enforcedMajor > 0 && currentMajorInt < enforcedMajor {
-            cliInfo("Enforcement:", "Machine on \(current) — major upgrade to \(enforcedMajor).x required")
-            // If softwareupdate found the major upgrade, use it.
-            // Otherwise use the manually configured targetVersion.
-            let majorCandidate = available.first(where: {
-                (Int($0.version.split(separator: ".").first ?? "0") ?? 0) >= enforcedMajor
-            })
-            if let candidate = majorCandidate {
-                cliInfo("Major upgrade found:", "\(candidate.name) \(candidate.version)")
-                handleDetectedUpdate(candidate, config: config, current: current)
-            } else if !config.update.targetVersion.isEmpty {
-                cliInfo("Using configured target:", config.update.targetVersion)
-                runNudgeSchedule(config: config)
-            } else {
-                cliWarning("enforceMinimumMajorVersion = \(enforcedMajor) but macOS \(enforcedMajor) not yet available via softwareupdate.")
-                cliPrint("Set update.targetVersion manually when the upgrade becomes available.")
+        let best: DetectedUpdate?
+        let currentMajor = Int(current.split(separator: ".").first ?? "0") ?? 0
+        let minimumMajorRequired = config.auto.enforceMinimumMajorVersion > currentMajor
+        if !config.auto.trackLatest && !config.update.targetVersion.isEmpty && !minimumMajorRequired {
+            // Keep legacy deployments on their explicitly configured target until tracking is enabled.
+            if versionGTE(current, config.update.targetVersion) {
+                cliSuccess("Already compliant with configured target \(config.update.targetVersion). Enable auto.trackLatest to follow new releases.")
+                if !checkOnly && !notifyOnly && !installNow {
+                    if config.auto.autoInstallNonSystemUpdates && (isForced || isWithinAlertWindow(config: config)) { installNonSystemUpdatesQuietly() }
+                    performUptimeCheck(config: config)
+                }
+                return
             }
-            exit(0)
-        }
-
-        if available.isEmpty {
-            if !config.update.targetVersion.isEmpty {
-                cliLog("[AutoCheck] No new update found but targetVersion set — running nudge schedule")
-                runNudgeSchedule(config: config)
-            } else {
-                cliSuccess("No updates found. \(current) is current.")
-                cliLog("[AutoCheck] No updates found")
-                WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
-                runUptimeCheckIfAllowed(config: config)
+            best = available.first { sameOSVersion($0.version, config.update.targetVersion) }
+                ?? DetectedUpdate(version: config.update.targetVersion, name: config.update.macOSName,
+                    isMajor: config.isMajor, isBeta: false)
+        } else { best = pickBestUpdate(from: available, config: config, current: current) }
+        guard let best else {
+            if let issue = loadState().lastDiscoveryError, !issue.isEmpty { cliWarning("Discovery incomplete: \(issue)") }
+            else { cliSuccess("No newer eligible macOS update was found for this Mac and policy.") }
+            if !checkOnly && !notifyOnly && !installNow {
+                if config.auto.autoInstallNonSystemUpdates && (isForced || isWithinAlertWindow(config: config)) { installNonSystemUpdatesQuietly() }
+                performUptimeCheck(config: config)
             }
-            exit(0)
+            return
         }
-
-        guard let best = pickBestUpdate(from: available, config: config, current: current) else {
-            cliPrint("Updates found but all filtered (beta/minorOnly).")
-            exit(0)
-        }
-
-        cliInfo("Update found:", "\(best.name) \(best.version)")
-        cliInfo("Release type:", best.isMajor ? "Major upgrade" : "Minor update")
-
-        if DetectionLog.firstSeen(version: best.version) == nil {
-            DetectionLog.record(version: best.version, date: Date())
-        }
-
+        DetectionLog.record(version: best.version)
         handleDetectedUpdate(best, config: config, current: current)
     }
 
     private func handleDetectedUpdate(_ best: DetectedUpdate, config: CLIConfig, current: String) {
-        // isNewVersion is ONLY true when the version actually changed.
-        // --force overrides the schedule (fires nudge regardless of window/timing)
-        // but should NOT reset the deferral/toast schedule if version is unchanged.
-        let versionChanged = config.update.targetVersion != best.version
-        let isNewVersion   = versionChanged
-
-        if isNewVersion {
-            // ── New version: configure and show first softNudge ──
-            let deadlineDays = best.isMajor ? config.auto.majorDeadlineDays : config.auto.minorDeadlineDays
-            let maxDeferrals = best.isMajor ? config.auto.majorMaxDeferrals : config.auto.minorMaxDeferrals
-            let firstSeen    = DetectionLog.firstSeen(version: best.version) ?? Date()
-            let autoDeadline = Calendar.current.date(byAdding: .day, value: deadlineDays, to: firstSeen) ?? Date()
-            let autoStr      = ISO8601DateFormatter().string(from: autoDeadline)
-
-            // Honor an explicit deadline already in config IF either:
-            //   (a) it's for this same target version (preserves admin override
-            //       across hourly daemon runs), OR
-            //   (b) targetVersion is empty (first detection — no prior version
-            //       exists to compare against, so an explicit deadline must be
-            //       intentional and should be respected).
-            // Only when targetVersion is set AND points to a different version
-            // do we discard the deadline as stale.
-            let deadlineStr: String
-            if !config.update.deadline.isEmpty
-                && (config.update.targetVersion.isEmpty
-                    || config.update.targetVersion == best.version) {
-                deadlineStr = config.update.deadline
-                cliLog("[AutoCheck] Honoring explicit deadline from config: \(deadlineStr)")
-            } else {
-                deadlineStr = autoStr
-            }
-            let parsedDeadline = ISO8601DateFormatter().date(from: deadlineStr) ?? autoDeadline
-            let daysLeft = Calendar.current.dateComponents([.day], from: Date(), to: parsedDeadline).day ?? 0
-
-            cliSection("📝 Configuring")
-            cliInfo("Target version:", best.version)
-            cliInfo("Release type:",  best.isMajor ? "major" : "minor")
-            cliInfo("Deadline:",      "\(deadlineStr) (\(daysLeft) days)")
-            cliInfo("Max deferrals:", "\(maxDeferrals)")
-
-            if isDryRun {
-                cliWarning("DRY RUN — nothing written.")
-                exit(0)
-            }
-
-            guard getuid() == 0 else {
-                cliError("Writing config requires root. Run: sudo push-cli auto-check")
-                exit(1)
-            }
-
-            guard var cfg = try? loadConfig(), let cfgPath = resolvedConfigPath else {
-                cliError("Cannot load config for update."); exit(1)
-            }
-
-            let prevVersion = cfg.update.targetVersion
-            cfg.update.targetVersion = best.version
-            cfg.update.macOSName     = best.name
-            cfg.update.releaseType   = best.isMajor ? "major" : "minor"
-            cfg.update.deadline      = deadlineStr
-            cfg.update.maxDeferrals  = maxDeferrals
-
-            guard let yamlData = cfg.toYAML().data(using: .utf8) else {
-                cliError("Failed to generate YAML"); exit(1)
-            }
-            do {
-                try yamlData.write(to: URL(fileURLWithPath: cfgPath), options: .atomic)
-                cliSuccess("Config updated")
-            } catch {
-                cliError("Failed to write config: \(error.localizedDescription)"); exit(1)
-            }
-
-            // Reset deferrals for new version
-            if prevVersion != best.version {
-                var state = loadState()
-                state.deferralCount    = 0
-                state.nextNudgeDate    = .distantPast   // fire immediately on first detection
-                // Schedule first toast for after the initial nudge would be dismissed.
-                // Don't use distantFuture — there's no reliable "nudge closed" hook,
-                // so it would leave the toast permanently disabled.
-                state.nextToastDate    = Date().addingTimeInterval(cfg.toastIntervalSeconds)
-                state.lastSeenVersion  = best.version
-                state.installStarted   = false
-                state.installCompleted = false
-                try? saveState(state)
-                cliSuccess("Deferrals reset for \(best.version)")
-            }
-
-            if config.auto.notifyAdminOnDetection && !config.auto.adminWebhookURL.isEmpty {
-                sendWebhook(config: cfg, update: best, deadline: deadlineStr)
-            }
-
-            cliSection("✅ Done")
-            cliPrint("Showing initial softNudge…")
-
-            // Lock nextNudgeDate BEFORE showing so concurrent runs don't also fire
-            var lockState = loadState()
-            lockState.nextNudgeDate = Date().addingTimeInterval(cfg.nudgeIntervalSeconds)
-            lockState.nextToastDate = Date().addingTimeInterval(cfg.toastIntervalSeconds)
-            try? saveState(lockState)
-
-            showNudge(config: cfg)
-
-            // After nudge closes, set toast to +1h from now
-            var s = loadState()
-            s.nextToastDate = Date().addingTimeInterval(cfg.toastIntervalSeconds)
-            try? saveState(s)
-            cliLog("[AutoCheck] Initial nudge done. Toast in \(formatInterval(Int(cfg.toastIntervalSeconds))), next nudge in \(formatInterval(Int(cfg.nudgeIntervalSeconds)))")
-
-        } else {
-            // ── Already configured: run nudge schedule ──
-            if isForced {
-                cliLog("[AutoCheck] --force with same version — running nudge schedule (force mode)")
-                // Still respect deadline enforcement even in force mode
-                runNudgeSchedule(config: config)
-            } else {
-                runNudgeSchedule(config: config)
+        guard let cfgPath = resolvedConfigPath, let original = try? String(contentsOfFile: cfgPath, encoding: .utf8) else {
+            cliError("Cannot reload config; no changes were made."); return
+        }
+        var cfg = CLIConfig.parse(yaml: original)
+        guard cfg.update.deadline.isEmpty || ISO8601DateFormatter().date(from: cfg.update.deadline) != nil else {
+            cliError("The YAML deadline override is invalid; no changes were made."); return
+        }
+        guard DiscoveryPolicy.eligible(version: best.version, beta: best.isBeta, current: current, config: cfg) else {
+            cliPrint("The selected target is excluded by the current update policy."); return
+        }
+        let changed = !sameOSVersion(cfg.update.targetVersion, best.version)
+        var automatic = cfg
+        automatic.update.deadline = ""
+        let generated = DiscoveryPolicy.deadline(config: automatic, target: best.version,
+            isMajor: best.isMajor, firstSeen: DetectionLog.firstSeen(version: best.version) ?? Date())
+        cfg.update.targetVersion = best.version
+        cfg.update.macOSName = best.name
+        cfg.update.releaseType = best.isMajor ? "major" : "minor"
+        cfg.update.automaticDeadline = generated
+        cfg.update.automaticDeadlineTarget = best.version
+        if changed { cfg.update.maxDeferrals = best.isMajor ? cfg.auto.majorMaxDeferrals : cfg.auto.minorMaxDeferrals }
+        guard (try? String(contentsOfFile: cfgPath, encoding: .utf8)) == original else {
+            cliError("Configuration changed during discovery; retry to use the new policy."); return
+        }
+        do { try cfg.updatingDetectionYAML(original).write(toFile: cfgPath, atomically: true, encoding: .utf8) }
+        catch { cliError("Could not save detected update; no action started."); return }
+        if changed {
+            var state = loadState()
+            state.deferralCount = 0
+            state.nextNudgeDate = .distantPast
+            state.nextToastDate = Date().addingTimeInterval(cfg.toastIntervalSeconds)
+            state.lastSeenVersion = best.version
+            state.installCompleted = false
+            do { try saveState(state) } catch { cliError("Could not save discovery state; no action started."); return }
+            if !checkOnly && cfg.auto.notifyAdminOnDetection && !cfg.auto.adminWebhookURL.isEmpty {
+                sendWebhook(config: cfg, update: best, deadline: cfg.effectiveDeadline)
             }
         }
+        cliInfo("Target:", best.version)
+        cliInfo("Deadline:", cfg.effectiveDeadline)
+        cliInfo("Deadline source:", cfg.update.deadline.isEmpty ? "Automatic, anchored to first detection" : "Explicit YAML override")
+        if checkOnly { cliPrint("Check complete. No popup, download, or installation was started."); return }
+        if installNow {
+            RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
+            InstallWorkflow(config: cfg, skipInitialPrompt: true).run()
+            return
+        }
+        if notifyOnly {
+            showNudge(config: cfg)
+            return
+        }
+        if !isForced && !isWithinAlertWindow(config: cfg) {
+            cliPrint("Discovery saved. Outside the alert window; notifications will resume during working hours."); return
+        }
+        if cfg.auto.autoInstallNonSystemUpdates { installNonSystemUpdatesQuietly() }
+        runNudgeSchedule(config: cfg)
     }
 
     // MARK: - Nudge schedule
@@ -330,7 +193,12 @@ struct AutoCheckCommand {
 
         cliLog("[AutoCheck] Checking schedule — nextNudge: \(state.nextNudgeDate), nextToast: \(state.nextToastDate)")
 
-        runUptimeCheckIfAllowed(config: config)
+        // Uptime check — runs HERE (not earlier in the flow) because we need
+        // the post-detection target version to know whether to skip. If an
+        // OS update is pending, the uptime evaluator will return .quiet.
+        if !isDryRun {
+            performUptimeCheck(config: config)
+        }
 
         // ── Deadline enforcement — always checked first ───────────────────────────
         if config.isPastDeadline {
@@ -355,6 +223,7 @@ struct AutoCheckCommand {
             if config.update.silentInstallAfterDeadline {
                 cliLog("[AutoCheck] Deadline passed + silentInstallAfterDeadline=true — silent install")
                 cliPrint("Deadline passed. Running silent install (no UI prompt).")
+                RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
                 InstallWorkflow(config: config, skipInitialPrompt: true).run()
                 return
             }
@@ -373,13 +242,14 @@ struct AutoCheckCommand {
                     Thread.sleep(forTimeInterval: 1.0)
                     // Launch directly (not via open -a) so --forced flag is always received
                     if let user = consoleUser() {
-                        let launchCmd = "launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \"\(uiPath)\" --state hardBlock --config \"\(cfgPath)\" --deferrals \(state.deferralCount) --forced > /tmp/push-ui.log 2>&1 &"
+                        let launchCmd = "launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \"\(uiPath)\" --state hardBlock --config \"\(cfgPath)\" --deferrals \(state.deferralCount) --forced > /dev/null 2>&1 &"
                         shell(launchCmd)
                         cliLog("[AutoCheck] Forced hardBlock launched directly (uid \(user.uid))")
                     }
                     Thread.sleep(forTimeInterval: 2.0)
                 }
 
+                RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
                 InstallWorkflow(config: config, skipInitialPrompt: true).run()
                 return
             }
@@ -387,7 +257,7 @@ struct AutoCheckCommand {
             // Default: show hardBlock and wait for user to click
         }
 
-        if state.nextNudgeDate <= Date() {
+        if isForced || state.nextNudgeDate <= Date() {
             // Lock nextNudgeDate to tomorrow BEFORE showing the nudge.
             // This prevents concurrent daemon runs from also firing the nudge
             // while this run is blocking on the popup.
@@ -428,7 +298,7 @@ struct AutoCheckCommand {
 
         let uiPath = resolveUIBinary()
         guard FileManager.default.fileExists(atPath: uiPath) else {
-            cliLog("[AutoCheck] push-ui not found — skipping toast"); return
+            RuntimeHealthScope.note("The PUSH popup app is missing",error:true); cliLog("[AutoCheck] push-ui not found — skipping toast"); return
         }
         guard let cfgPath = resolvedConfigPath else { return }
 
@@ -436,31 +306,18 @@ struct AutoCheckCommand {
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.4)
 
-        // Toast is non-blocking — fire and forget
-        launchUIAsUser("\"\(uiPath)\" --state toast --config \"\(cfgPath)\" --deferrals \(state.deferralCount)")
-
-        // Toast NEVER counts a deferral — just update next toast date.
-        // If user dismisses without acting, retry in 30 min instead of full interval
-        // so they don't wait a full hour after accidentally closing it.
-        var s = loadState()
-        s.nextToastDate = Date().addingTimeInterval(config.toastIntervalSeconds)
-        try? saveState(s)
-        cliLog("[AutoCheck] Toast launched. Next toast in \(formatInterval(Int(config.toastIntervalSeconds)))")
-
-        // Poll briefly to see if user clicked Install — toast is non-blocking
-        // If they did, the install command exits with 0 and we pick it up here
-        Thread.sleep(forTimeInterval: 2.0)
-        let exitFile = "/tmp/push-toast-action"
-        if let action = try? String(contentsOfFile: exitFile, encoding: .utf8) {
-            try? FileManager.default.removeItem(atPath: exitFile)
-            if action.trimmingCharacters(in: .whitespaces) == "install" {
-                cliLog("[AutoCheck] User clicked Install from toast — starting install workflow")
-                InstallWorkflow(config: config, skipInitialPrompt: true).run()
-            }
+        // Schedule first, then wait for this specific toast's response.
+        // No shared temporary file can turn a manual test into an install request.
+        var next = loadState()
+        next.nextToastDate = Date().addingTimeInterval(config.toastIntervalSeconds)
+        try? saveState(next)
+        let status = runUIBlocking("\"\(uiPath)\" --state toast --config \"\(cfgPath)\" --deferrals \(state.deferralCount)")
+        cliLog("[AutoCheck] " + popupResultMessage(state: "toast", exitCode: status))
+        if toastRequestedInstall(exitCode: status) {
+            RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
+            InstallWorkflow(config: config, skipInitialPrompt: true).run()
         }
-
-        // If user clicks Install Now from toast, handle it via a temp file
-        // check on next run — toast is non-blocking so we can't wait here
+        // Later, close, timeout, and failure do not install or consume a deferral.
     }
 
     // MARK: - Show softNudge or hardBlock (Later counts deferral)
@@ -469,6 +326,7 @@ struct AutoCheckCommand {
         // Skip if no user is logged in — cannot show UI at login window.
         // Log clearly so IT knows why the nudge was skipped.
         guard userIsLoggedIn() else {
+            RuntimeHealthScope.note("No console user is available for the update prompt")
             cliLog("[AutoCheck] No console user logged in — skipping nudge, will retry next run")
             cliPrint("No user logged in. Will retry when a user is at the console.")
             return
@@ -480,7 +338,7 @@ struct AutoCheckCommand {
         let noDeferrals0  = state0.deferralCount >= config.update.maxDeferrals
         let isHardBlock   = config.isPastDeadline || noDeferrals0
 
-        if !isHardBlock && config.schedule.skipDuringMeetings && isUserInMeeting() {
+        if !isForced && !isHardBlock && config.schedule.skipDuringMeetings && isUserInMeeting() {
             cliLog("[AutoCheck] Meeting/presentation detected — skipping nudge, will retry next run")
             cliPrint("Skipped: user appears to be in a meeting.")
             return
@@ -509,29 +367,13 @@ struct AutoCheckCommand {
 
         let notifier = NotificationManager(config: config)
 
-        // Opportunistic password capture — runs on ANY soft-nudge engagement
-        // (Install / Later / Schedule) so we have a valid saved password ready
-        // for future installs (deadline-forced or user-initiated). If a valid
-        // saved password already exists, this is a no-op.
-        //
-        // We only do this for soft nudges, never for hard blocks — hard block
-        // is past-deadline and engaging means immediate install, which has
-        // its own prompt path.
-        //
-        // We exclude exit code 2 (dismiss/X/Esc) — that's "I don't even want
-        // to engage with this dialog" and we shouldn't push a password capture
-        // on a dismissive user. They'll get another nudge soon enough.
-        let didEngage = (Int(status) == 0 || Int(status) == 1 || Int(status) == 3)
-        if uiState == "softNudge" && didEngage {
-            captureUserPasswordIfNeeded(config: config, uiPath: uiPath, cfgPath: cfgPath)
-        }
-
         switch Int(status) {
         case 0:
             // User clicked Install Now
             cliLog("[AutoCheck] User accepted — starting install workflow")
             try? saveState(state)
             // skipInitialPrompt=true because user already confirmed in this nudge popup
+            RuntimeHealthScope.phase("updating","A macOS installation was requested; authorization and preflight checks still apply")
             InstallWorkflow(config: config, skipInitialPrompt: true).run()
             return
         case 1:
@@ -564,7 +406,7 @@ struct AutoCheckCommand {
                let scheduledDate = ISO8601DateFormatter().date(from: iso) {
                 // Cap to deadline as a safety net (UI also caps, this is defense-in-depth)
                 let cappedDate: Date
-                if let deadlineDate = ISO8601DateFormatter().date(from: config.update.deadline),
+                if let deadlineDate = ISO8601DateFormatter().date(from: config.effectiveDeadline),
                    scheduledDate > deadlineDate {
                     cappedDate = deadlineDate.addingTimeInterval(-3600)
                     cliLog("[AutoCheck] User picked \(iso) but capped to deadline-1h")
@@ -599,32 +441,19 @@ struct AutoCheckCommand {
 
         // Jamf EA report
         let current = currentMacOSVersion()
-        let isCompliant = versionGTE(current, config.update.targetVersion)
         notifier.reportJamfEA(
-            compliant:  isCompliant,
+            compliant:  versionGTE(current, config.update.targetVersion),
             current:    current,
             target:     config.update.targetVersion,
             deferrals:  state.deferralCount
         )
-
-        // Compliance wallpaper. While non-compliant, PUSH owns the visual
-        // signal. Once compliant, only replace PUSH's own non-compliant image;
-        // leave any user-chosen wallpaper alone.
-        let desiredWallpaper: WallpaperState = isCompliant ? .compliant : .nonCompliant
-        let wallpaper = WallpaperManager(config: config)
-        switch desiredWallpaper {
-        case .nonCompliant:
-            wallpaper.applyIfStateChanged(.nonCompliant)
-        case .compliant:
-            wallpaper.applyCompliantIfReplacingNonCompliant()
-        }
 
         try? saveState(state)
     }
 
     // MARK: - Alert window
 
-    private func isWithinAlertWindow(config: CLIConfig) -> Bool {
+    func isWithinAlertWindow(config: CLIConfig) -> Bool {
         let cal     = Calendar.current
         let now     = Date()
         let hour    = cal.component(.hour,    from: now)
@@ -649,29 +478,29 @@ struct AutoCheckCommand {
     // MARK: - Update detection
 
     private func detectAvailableUpdates(config: CLIConfig) -> [DetectedUpdate] {
-        // Step 1: Check mdmclient for MDM-pushed updates
-        let (mdmOut, _) = shell("/usr/libexec/mdmclient AvailableOSUpdates 2>/dev/null")
-        if !mdmOut.trimmingCharacters(in: .whitespaces).isEmpty {
-            cliLog("[AutoCheck] mdmclient output:\n\(mdmOut)")
+        var updates: [DetectedUpdate] = []
+        var issues: [String] = []
+        var succeeded = false
+        do {
+            let output = try discoveryOutput("/usr/sbin/softwareupdate", ["--list"], timeout: 180)
+            updates = parseUpdates(output: output, config: config)
+            succeeded = true
+        } catch { issues.append("Apple Software Update: \(error.localizedDescription)") }
+        if config.auto.useMist {
+            let candidates = ["/usr/local/bin/mist", "/opt/homebrew/bin/mist"]
+            if let binary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+                do {
+                    updates += try compatibleMistUpdates(binary: binary, current: currentMacOSVersion())
+                    succeeded = true
+                } catch { issues.append("Mist: \(error.localizedDescription)") }
+            } else { issues.append("Optional mist-cli is missing; only Apple Software Update was checked.") }
         }
-
-        // Step 2: softwareupdate --list (primary source)
-        let (swuOut, _) = shell("/usr/sbin/softwareupdate --list 2>&1")
-        var updates = parseUpdates(output: swuOut, config: config)
-
-        // Step 3: SOFA feed for zero-day release date awareness (non-blocking)
-        fetchSOFAFeed()
-
+        var state = loadState()
+        if succeeded { state.lastDiscoveryDate = Date() }
+        state.lastDiscoveryError = issues.isEmpty ? nil : issues.joined(separator: " ")
+        do { try saveState(state) } catch { cliError("Could not save discovery health.") }
+        for issue in issues { cliLog("[Discovery] \(issue)") }
         return updates
-    }
-
-    private func fetchSOFAFeed() {
-        let sofaPath = "/tmp/push-sofa-macos-feed.json"
-        let etagPath = "/tmp/push-sofa-etag.txt"
-        // Non-blocking fire-and-forget — used for future release date awareness
-        let etagArg = FileManager.default.fileExists(atPath: etagPath) ? "--etag-save \"\(etagPath)\"" : "--etag-save \"\(etagPath)\""
-        shell("curl -s --max-time 10 --location \"https://sofafeed.macadmins.io/v1/macos_data_feed.json\" \(etagArg) --output \"\(sofaPath)\" 2>/dev/null &")
-        cliLog("[AutoCheck] SOFA feed check dispatched")
     }
 
     private func parseUpdates(output: String, config: CLIConfig) -> [DetectedUpdate] {
@@ -684,7 +513,7 @@ struct AutoCheckCommand {
             guard line.contains("Title:") && line.contains("Version:") else { continue }
             let title   = field("Title",   from: line)
             let version = field("Version", from: line)
-            guard !version.isEmpty, isValidVersion(version),
+            guard title.lowercased().hasPrefix("macos"), !version.isEmpty, isValidVersion(version),
                   !versionGTE(current, version) else { continue }
 
             let targetMajor = Int(version.split(separator: ".").first ?? "0") ?? 0
@@ -695,27 +524,6 @@ struct AutoCheckCommand {
                                           isMajor: isMajor, isBeta: isBeta))
         }
 
-        // Fallback: scan bare version patterns
-        if updates.isEmpty {
-            let vReg = try? NSRegularExpression(pattern: #"\b(\d{1,3}\.\d+(?:\.\d+)?)\b"#)
-            let nReg = try? NSRegularExpression(pattern: #"macOS\s+([A-Za-z]+)"#)
-            for line in lines {
-                guard line.contains("macOS") else { continue }
-                let range = NSRange(line.startIndex..., in: line)
-                guard let vm = vReg?.firstMatch(in: line, range: range),
-                      let vr = Range(vm.range(at: 1), in: line) else { continue }
-                let version = String(line[vr])
-                guard isValidVersion(version), !versionGTE(current, version) else { continue }
-                let tMajor = Int(version.split(separator: ".").first ?? "0") ?? 0
-                var name = "macOS"
-                if let nm = nReg?.firstMatch(in: line, range: range),
-                   let nr = Range(nm.range(at: 1), in: line) {
-                    name = "macOS \(String(line[nr]))"
-                }
-                updates.append(DetectedUpdate(version: version, name: name,
-                                              isMajor: tMajor != currentMajor, isBeta: false))
-            }
-        }
         return updates
     }
 
@@ -733,14 +541,8 @@ struct AutoCheckCommand {
 
     private func pickBestUpdate(from updates: [DetectedUpdate],
                                 config: CLIConfig, current: String) -> DetectedUpdate? {
-        updates
-            .filter { u in
-                !(config.auto.skipBetas && u.isBeta)
-                && !config.auto.skipVersions.contains(u.version)
-                && !(config.auto.minorOnly && u.isMajor)
-            }
-            .sorted { !versionGTE($0.version, $1.version) }
-            .last
+        updates.filter { DiscoveryPolicy.eligible(version: $0.version, beta: $0.isBeta, current: current, config: config) }
+            .sorted { !versionGTE($0.version, $1.version) }.last
     }
 
     private func detectDDMVersion() -> String? {
@@ -773,65 +575,18 @@ struct AutoCheckCommand {
 // MARK: - CLIConfig YAML serializer (minimal, only fields we need to update)
 
 extension CLIConfig {
-    func toYAML() -> String {
-        // Read the existing file and update only the changed values
-        // to preserve comments and formatting
-        guard let cfgPath = resolvedConfigPath,
-              var yaml = try? String(contentsOfFile: cfgPath, encoding: .utf8)
-        else {
-            return generateMinimalYAML()
-        }
-
-        func setField(_ key: String, _ value: String, in yaml: inout String) {
-            let pattern = "^(\\s*\(NSRegularExpression.escapedPattern(for: key)):).*$"
-            guard let regex = try? NSRegularExpression(pattern: pattern,
-                                                        options: .anchorsMatchLines)
-            else { return }
-            let range = NSRange(yaml.startIndex..., in: yaml)
-            yaml = regex.stringByReplacingMatches(in: yaml, range: range,
-                                                   withTemplate: "$1 \(value)")
-        }
-
-        setField("targetVersion", "\"\(update.targetVersion)\"", in: &yaml)
-        setField("macOSName",     "\"\(update.macOSName)\"",     in: &yaml)
-        setField("releaseType",   "\"\(update.releaseType)\"",   in: &yaml)
-        setField("deadline",      "\"\(update.deadline)\"",      in: &yaml)
-        setField("maxDeferrals",  "\(update.maxDeferrals)",      in: &yaml)
+    func updatingDetectionYAML(_ source: String) -> String {
+        var yaml = source
+        for (key, value) in [
+            ("targetVersion", update.targetVersion), ("macOSName", update.macOSName),
+            ("releaseType", update.releaseType), ("deadline", update.deadline),
+            ("automaticDeadline", update.automaticDeadline), ("automaticDeadlineTarget", update.automaticDeadlineTarget),
+            ("maxDeferrals", String(update.maxDeferrals))
+        ] { yaml = updatingYAMLString(yaml, section: ["update"], field: key, value: value) }
 
         return yaml
     }
 
-    private func generateMinimalYAML() -> String {
-        """
-update:
-  targetVersion: "\(update.targetVersion)"
-  macOSName: "\(update.macOSName)"
-  releaseType: "\(update.releaseType)"
-  deadline: "\(update.deadline)"
-  maxDeferrals: \(update.maxDeferrals)
-  nudgeIntervalSeconds: \(update.nudgeIntervalSeconds)
-ui:
-  appName: "\(ui.appName)"
-  orgName: "\(ui.orgName)"
-  accentColorHex: "\(ui.accentColorHex)"
-  itContactEmail: "\(ui.itContactEmail)"
-  itContactPhone: "\(ui.itContactPhone)"
-  hardBlockFullscreen: \(ui.hardBlockFullscreen)
-auto:
-  enabled: \(auto.enabled)
-  minorOnly: \(auto.minorOnly)
-  minorDeadlineDays: \(auto.minorDeadlineDays)
-  majorDeadlineDays: \(auto.majorDeadlineDays)
-schedule:
-  alertStartHour: \(schedule.alertStartHour)
-  alertEndHour: \(schedule.alertEndHour)
-  skipWeekends: \(schedule.skipWeekends)
-debug:
-  dryRun: \(debug.dryRun)
-  testToastIntervalMinutes: \(debug.testToastIntervalMinutes)
-  testNudgeIntervalMinutes: \(debug.testNudgeIntervalMinutes)
-"""
-    }
 }
 
 // MARK: - Meeting / presentation detection
@@ -873,66 +628,10 @@ extension AutoCheckCommand {
         return !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Opportunistic password capture. Called when the user engages with a
-    /// soft nudge (any button click except dismiss). If we don't already have
-    /// a valid saved password for the console user, show the password prompt
-    /// and store on success. Cancel is OK — original action proceeds without
-    /// a saved password, and we'll try again on the next nudge.
-    private func captureUserPasswordIfNeeded(config: CLIConfig, uiPath: String, cfgPath: String) {
-        guard isAppleSilicon() else { return }
-        guard let console = consoleUser(), !console.name.isEmpty else { return }
-
-        if let account = try? loadConfig().auth.localAccount,
-           !account.isEmpty,
-           let pwd = keychainPassword(),
-           validateUserPassword(account: account, password: pwd) {
-            cliLog("[AutoCheck] System Keychain password already valid for \(account) — skipping capture")
-            return
-        }
-
-        // Already have a saved password? Validate it before assuming it works.
-        if userPasswordExistsInLoginKeychain(account: console.name) {
-            if let pwd = readUserPasswordFromLoginKeychain(account: console.name),
-               validateUserPassword(account: console.name, password: pwd) {
-                if storeSystemKeychainPassword(account: console.name, password: pwd) {
-                    deleteUserPasswordFromLoginKeychain(account: console.name)
-                }
-                cliLog("[AutoCheck] User \(console.name) already has a valid saved password — migrated to System Keychain")
-                return
-            }
-            // Saved but invalid (changed macOS password, etc.) — delete and re-prompt
-            cliLog("[AutoCheck] Saved password for \(console.name) is invalid — clearing and re-prompting")
-            deleteUserPasswordFromLoginKeychain(account: console.name)
-        }
-
-        cliLog("[AutoCheck] No valid saved password — prompting user (will save on success)")
-        // The passwordPrompt UI state already handles validate-and-save on its
-        // own. Run it blocking so we capture the result, but don't gate the
-        // user's chosen action on it — if they cancel, we proceed anyway.
-        let cmd = "\"\(uiPath)\" --state passwordPrompt --config \"\(cfgPath)\""
-        let result = runUIBlocking(cmd)
-        if Int(result) == 0 {
-            if let pwd = consumePasswordHandoff(for: console),
-               validateUserPassword(account: console.name, password: pwd),
-               storeSystemKeychainPassword(account: console.name, password: pwd) {
-                cliLog("[AutoCheck] Password captured and saved in System Keychain for \(console.name)")
-            } else {
-                cliLog("[AutoCheck] Password prompt succeeded but System Keychain storage failed")
-            }
-        } else {
-            cliLog("[AutoCheck] User canceled password prompt — proceeding without saved password")
-        }
-    }
-
     /// Run the uptime monitoring check. May launch a popup; never blocks the
     /// rest of auto-check. The popup runs in the user's session via launchctl
     /// asuser so we don't gate on its result here — user's response is handled
     /// by a small follow-up exit-code switch below.
-    private func runUptimeCheckIfAllowed(config: CLIConfig) {
-        guard !isDryRun else { return }
-        performUptimeCheck(config: (try? loadConfig()) ?? config)
-    }
-
     private func performUptimeCheck(config: CLIConfig) {
         let decision = UptimeCheck(config: config).evaluate()
         switch decision {
@@ -1040,4 +739,78 @@ extension AutoCheckCommand {
         if !current.isEmpty && !requiresRestart { labels.append(current) }
         return labels
     }
+}
+
+
+// MARK: - Read-only catalog access (no download or install commands)
+// Developer: Sebastian Santos
+struct DiscoveryError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+func discoveryOutput(_ executable: String, _ arguments: [String], timeout: TimeInterval) throws -> String {
+    let fm = FileManager.default
+    let folder = fm.temporaryDirectory.appendingPathComponent("push-discovery-" + UUID().uuidString)
+    try fm.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? fm.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("output")
+    guard fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]),
+          let output = FileHandle(forWritingAtPath: file.path) else { throw DiscoveryError(message: "Cannot prepare catalog output.") }
+    defer { try? output.close() }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = output; process.standardError = output
+    try process.run()
+    let end = Date().addingTimeInterval(timeout)
+    while process.isRunning {
+        let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue ?? 0
+        if Date() >= end || size > 8_388_608 {
+            process.terminate(); kill(process.processIdentifier, SIGKILL); process.waitUntilExit()
+            throw DiscoveryError(message: "Catalog query timed out or exceeded the output limit.")
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    process.waitUntilExit()
+    guard process.terminationReason == .exit && process.terminationStatus == 0 else {
+        throw DiscoveryError(message: "Catalog query failed (exit \(process.terminationStatus)).")
+    }
+    guard let size = try fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber, size.intValue <= 8_388_608 else {
+        throw DiscoveryError(message: "Catalog output exceeded the size limit.")
+    }
+    return String(decoding: try Data(contentsOf: file), as: UTF8.self)
+}
+
+func parseMistUpdates(_ data: Data, current: String) throws -> [AutoCheckCommand.DetectedUpdate] {
+    let object = try JSONSerialization.jsonObject(with: data)
+    let items: [[String: Any]]
+    if let list = object as? [[String: Any]] { items = list }
+    else if let dict = object as? [String: Any], let list = (dict["installers"] ?? dict["items"]) as? [[String: Any]] { items = list }
+    else { throw DiscoveryError(message: "Unrecognized catalog format.") }
+    return items.compactMap { item in
+        let dict = Dictionary(item.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { a, _ in a })
+        func text(_ key: String) -> String { dict[key].map { String(describing: $0) } ?? "" }
+        let version = text("version"), name = text("name")
+        guard numericOSVersion(version) != nil, !versionGTE(current, version) else { return nil }
+        if ["false", "no", "0"].contains(text("compatible").lowercased()) { return nil }
+        let beta = name.lowercased().contains("beta") || name.lowercased().contains("release candidate")
+            || name.lowercased().contains("developer preview") || ["beta", "isbeta"].contains { ["true", "yes", "1"].contains(text($0).lowercased()) }
+        return AutoCheckCommand.DetectedUpdate(version: version, name: name.isEmpty ? "macOS" : name,
+            isMajor: version.split(separator: ".").first != current.split(separator: ".").first, isBeta: beta)
+    }
+}
+
+func compatibleMistUpdates(binary: String, current: String) throws -> [AutoCheckCommand.DetectedUpdate] {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("push-mist-list-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let export = folder.appendingPathComponent("catalog.json")
+    _ = try discoveryOutput(binary, ["list", "installer", "--compatible", "--export", export.path], timeout: 180)
+    let values = try export.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+    guard values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? Int.max) <= 16_777_216 else {
+        throw DiscoveryError(message: "Invalid or oversized catalog export.")
+    }
+    return try parseMistUpdates(Data(contentsOf: export), current: current)
 }

@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: PreviewApp.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // PreviewApp.swift — Preview host showing all PUSH popup states
 
 import SwiftUI

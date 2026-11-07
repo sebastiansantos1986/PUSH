@@ -1,0 +1,14 @@
+{
+  "engine": "1.6.0",
+  "admin": "0.5.0",
+  "engineRegressionChecks": 242,
+  "adminOfflineChecks": 182,
+  "architectures": "x86_64 arm64",
+  "packageInstalled": false,
+  "appsLaunched": false,
+  "liveChecksRun": false,
+  "packagePayloadVerified": true,
+  "scriptsSyntaxChecked": true,
+  "attributionVerified": true,
+  "visualVerification": "User to perform"
+}

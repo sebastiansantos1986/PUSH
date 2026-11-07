@@ -1,0 +1,48 @@
+Historical: original repaired-source test run (42 checks).
+The 1.2.0 source adds two checks; run Tests/run-safe-tests.sh yourself for current results.
+
+PASS: normalize trailing zero
+PASS: reject version prefix collision
+PASS: reject malformed target
+PASS: reject malformed target 26
+PASS: reject malformed target 26..1
+PASS: reject malformed target 26.1beta
+PASS: reject malformed target 26.1;touch x
+PASS: reject malformed target 26.1.0.1
+PASS: reject malformed target ２６.１
+PASS: native selection matches entire version
+PASS: unavailable native target rejected
+PASS: restart required for native install
+PASS: wrong installer rejected
+PASS: matching product metadata accepted
+PASS: unknown product metadata fails closed
+PASS: discovery skips wrong and unknown installers
+PASS: missing installer tool rejected
+PASS: modern MobileAsset metadata parsed
+PASS: ambiguous asset versions rejected
+PASS: password bytes and whitespace survive stdin exactly
+PASS: password metacharacters never execute
+PASS: password absent from process arguments
+PASS: child failure status preserved
+PASS: launch failure reported
+PASS: large output drains without deadlock and retained output is bounded
+PASS: UI error quoting keeps shell syntax literal
+PASS: begin is pending
+PASS: same boot cannot mark completion
+PASS: post-reboot verification uses original install target
+PASS: completion only emitted once
+PASS: failed reboot clears pending and permits retry
+PASS: partial upgrade never marks target complete
+PASS: launch and nonzero failure reset state
+PASS: existing state JSON remains readable
+Dry run: would install macOS 99.1. No actions performed.
+PASS: dry-run installation leaves state untouched
+PASS: missing account validation fails closed
+PASS: LAPS migration removes only nested credential
+PASS: password migration removes multiline scalar and preserves unrelated settings
+PASS: credential account is persisted
+PASS: migration creates missing nested section
+PASS: migration eliminates duplicate plaintext credential fields
+Dry run: auto-check will not change state, show prompts, download, install, or restart.
+PASS: auto-check dry-run leaves state untouched
+Passed 42 safe regression checks. No macOS installation commands were executed.

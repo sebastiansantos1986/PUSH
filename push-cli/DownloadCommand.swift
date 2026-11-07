@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: DownloadCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // DownloadCommand.swift — Download macOS update without installing
 //
 // Usage:
@@ -22,7 +32,7 @@ struct DownloadCommand {
         }
 
         let version = config.update.targetVersion
-        guard !version.isEmpty else {
+        guard numericOSVersion(version) != nil else {
             cliError("No target version set. Run: sudo push-cli config set update.targetVersion <version>"); exit(1)
         }
 
@@ -184,16 +194,7 @@ struct DownloadCommand {
     // MARK: - Helpers
 
     private func parseSWULabel(version: String, output: String) -> String? {
-        var current = ""
-        for line in output.components(separatedBy: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("* Label:") {
-                current = t.replacingOccurrences(of: "* Label:", with: "").trimmingCharacters(in: .whitespaces)
-            } else if t.contains("Version: \(version)") && !current.isEmpty {
-                return current
-            }
-        }
-        return nil
+        return nativeUpdateLabel(version: version, output: output)
     }
 
     private func parseMistBuild(version: String, csv: String) -> String? {
@@ -205,7 +206,7 @@ struct DownloadCommand {
                            .replacingOccurrences(of: "\"", with: "")
             let b = cols[1].trimmingCharacters(in: .whitespacesAndNewlines)
                            .replacingOccurrences(of: "\"", with: "")
-            if v == version || v.hasPrefix(version) { return b }
+            if sameOSVersion(v, version) { return b }
         }
         return nil
     }

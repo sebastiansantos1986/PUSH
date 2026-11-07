@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: JamfCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // JamfCommand.swift — `push-cli jamf …` subcommands
 //
 // Currently manages the Jamf LAPS API client secret in the System Keychain.
@@ -48,29 +58,20 @@ struct JamfSetLapsSecretCommand {
             cliError("Secret cannot be empty"); exit(1)
         }
 
-        // Delete any prior entry (security add fails if it already exists)
-        shell("security delete-generic-password -s '\(kJamfLapsKeychainService)' -a '\(kJamfLapsKeychainAccount)' '/Library/Keychains/System.keychain' 2>/dev/null || true")
-
-        let (_, addStatus) = shell("""
-            security add-generic-password \
-              -s '\(kJamfLapsKeychainService)' \
-              -a '\(kJamfLapsKeychainAccount)' \
-              -l 'PUSH — Jamf LAPS API Client Secret' \
-              -j 'Managed by push-cli. Used to fetch LAPS passwords from Jamf Pro.' \
-              -w '\(secret)' \
-              '/Library/Keychains/System.keychain'
-            """)
+        let addStatus: Int32 = PushKeychain.save(service: kJamfLapsKeychainService,
+            account: kJamfLapsKeychainAccount, password: secret, system: true) ? 0 : 1
 
         if addStatus == 0 {
             cliSuccess("Jamf LAPS client secret stored in System Keychain")
             cliLog("[Jamf] Stored LAPS client secret in System Keychain")
 
-            // If there's a plain-text secret in yaml, clear it so keychain wins cleanly.
-            if var cfg = try? loadConfig(), let _ = resolvedConfigPath,
-               !cfg.jamf.laps.clientSecret.isEmpty {
-                cfg.jamf.laps.clientSecret = ""
-                cliPrint("")
-                cliWarning("Plain-text clientSecret in config.yaml should be cleared manually — PUSH will now prefer keychain.")
+            if let cfgPath = resolvedConfigPath {
+                do {
+                    let yaml = try String(contentsOfFile: cfgPath, encoding: .utf8)
+                    let updated = updatingYAMLString(yaml, section: ["jamf", "laps"], field: "clientSecret", value: "")
+                    try updated.write(toFile: cfgPath, atomically: true, encoding: .utf8)
+                    cliSuccess("Plaintext LAPS secret removed from config")
+                } catch { cliError("Secret stored, but plaintext config cleanup failed."); exit(1) }
             }
             cliPrint("")
             cliPrint("Verify:       sudo push-cli jamf show-laps")
@@ -127,7 +128,8 @@ struct JamfClearLapsSecretCommand {
             cliError("jamf clear-laps-secret requires root. Run: sudo push-cli jamf clear-laps-secret")
             exit(1)
         }
-        let (_, status) = shell("security delete-generic-password -s '\(kJamfLapsKeychainService)' -a '\(kJamfLapsKeychainAccount)' '/Library/Keychains/System.keychain' 2>/dev/null")
+        let status: Int32 = PushKeychain.delete(service: kJamfLapsKeychainService,
+            account: kJamfLapsKeychainAccount, system: true) ? 0 : 1
         if status == 0 || status == 44 {
             cliSuccess("Jamf LAPS client secret cleared from keychain")
             cliLog("[Jamf] LAPS client secret removed from keychain")

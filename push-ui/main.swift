@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: main.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // main.swift — push-ui entry point
 // Transparent window enables frosted glass (.regularMaterial) throughout.
 
@@ -7,7 +17,7 @@ import AppKit
 // MARK: - Argument parsing
 
 let args = CommandLine.arguments
-let uiTamperEventPath = "/tmp/push-ui-tamper-events.log"
+handleCredentialRequest(args)
 
 func argVal(_ flag: String) -> String? {
     guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
@@ -55,14 +65,23 @@ EXIT CODES
 
 // Parse arguments
 let stateStr      = argVal("--state")    ?? "softNudge"
+if stateStr == "passwordPrompt" && !allowsUserPasswordPrompts {
+    print("User password prompts are disabled. IT must provide managed authorization.")
+    Foundation.exit(2)
+}
 let configPath    = argVal("--config")   ?? "/Library/Management/PUSH/config.yaml"
 let deferralStr   = argVal("--deferrals") ?? "0"
 let deferralCount = Int(deferralStr) ?? 0
 
 let state  = UIState.from(stateStr)
-let config = FileManager.default.fileExists(atPath: configPath)
+var config = FileManager.default.fileExists(atPath: configPath)
     ? UIConfig.load(from: configPath)
     : UIConfig()
+
+if let style = argVal("--background-style"), ["solid", "frosted"].contains(style) { config.ui.popupBackgroundStyle = style }
+if let raw = argVal("--background-opacity"), let percent = Int(raw) { config.ui.popupOpacityPercent = min(100, max(55, percent)) }
+
+if state == .entraRegistration { config.ui.popupWidth = min(900,max(420,config.ui.popupWidth)) }
 
 let context = UIContext(config: config, state: state,
                         deferralCount: deferralCount, configPath: configPath)
@@ -72,6 +91,17 @@ if let s = argVal("--download-subtitle") { context.downloadSubtitle = s }
 if let a = argVal("--disk-available")    { context.diskAvailableGB  = Double(a) ?? 8.5 }
 if let r = argVal("--disk-required")     { context.diskRequiredGB   = Double(r) ?? 25.0 }
 if let e = argVal("--error")             { context.errorMessage     = e }
+context.isManualTest = args.contains("--manual-test")
+if state == .entraRegistration {
+    if let payload = argVal("--entra-payload"), let notice = EntraNotice.decode(payload) { context.entraNotice = notice }
+    else if context.isManualTest { context.entraNotice = EntraNotice.preview(stage:Int(argVal("--entra-stage") ?? "1") ?? 1) }
+    else { Foundation.exit(PushExitCode.error.rawValue) }
+}
+if state == .appUpdates {
+    if let payload = argVal("--apps-payload"), let notices = AppUpdateNotice.decodePayload(payload) { context.appUpdates = notices }
+    else if !context.isManualTest { Foundation.exit(PushExitCode.error.rawValue) }
+}
+
 if args.contains("--quick-restart")      { context.quickRestart     = true }
 if args.contains("--forced")              { context.forcedInstall    = true }
 
@@ -79,21 +109,6 @@ if args.contains("--forced")              { context.forcedInstall    = true }
 if let u = argVal("--uptime-days")          { context.uptimeDays         = Int(u) ?? 0 }
 if let r = argVal("--deferrals-remaining")  { context.uptimeDeferralsRemaining = Int(r) ?? 0 }
 if let t = argVal("--timer-seconds")        { context.uptimeTimerSeconds = Int(t) ?? 600 }
-
-func recordTamperAttempt(_ message: String) {
-    let ts = ISO8601DateFormatter().string(from: Date())
-    let line = "[\(ts)] [UI-TAMPER] state=\(context.state.rawValue) forced=\(context.forcedInstall) \(message)\n"
-    guard let data = line.data(using: .utf8) else { return }
-
-    if FileManager.default.fileExists(atPath: uiTamperEventPath),
-       let handle = FileHandle(forWritingAtPath: uiTamperEventPath) {
-        handle.seekToEndOfFile()
-        handle.write(data)
-        handle.closeFile()
-    } else {
-        try? data.write(to: URL(fileURLWithPath: uiTamperEventPath), options: .atomic)
-    }
-}
 
 // MARK: - App
 
@@ -111,7 +126,16 @@ struct PushUIApp: App {
     }
 }
 
-PushUIApp.main()
+if state == .entraRegistration {
+    let application = NSApplication.shared
+    application.setActivationPolicy(.accessory)
+    let presenter = EntraWindowPresenter()
+    application.delegate = presenter
+    withExtendedLifetime(presenter) { application.run() }
+    Foundation.exit(PushExitCode.dismiss.rawValue)
+} else {
+    PushUIApp.main()
+}
 
 // MARK: - Root view
 
@@ -122,6 +146,8 @@ struct RootView: View {
         Group {
             switch ctx.state {
             case .toast:          ToastView()
+            case .appUpdates:     AppUpdatesToast()
+            case .entraRegistration: EntraRegistrationView()
             case .softNudge:      SoftNudgeView()
             case .hardBlock:      HardBlockView()
             case .preflightPower: PowerWaitView()
@@ -153,12 +179,12 @@ class PushAppDelegate: NSObject, NSApplicationDelegate {
             || context.state == .preflightDisk
             || context.state == .preflightPower
             || context.state == .rebooting
-        if isForcedInstall {
-            recordTamperAttempt("termination blocked")
+            || context.state == .rebootForce
+        if isForcedInstall && !context.isManualTest {
             NSLog("[PUSH-UI] Termination blocked — forced install in progress")
             return .terminateCancel
         }
-        return .terminateNow
+        Foundation.exit(PushExitCode.dismiss.rawValue)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -263,7 +289,7 @@ private struct WindowConfigurator: NSViewRepresentable {
         window.level           = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        if state == .toast {
+        if state == .toast || state == .appUpdates {
             window.styleMask       = [.borderless, .fullSizeContentView]
             window.appearance      = nil
             window.backgroundColor = .clear
@@ -324,6 +350,11 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
 
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.25) {
+            if let path = argVal("--ready-file"), window.isVisible, window.alphaValue > 0 {
+                try? "ready\n".write(toFile:path,atomically:true,encoding:.utf8)
+            }
+        }
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let isForcedInstall = context.forcedInstall
@@ -334,24 +365,21 @@ private struct WindowConfigurator: NSViewRepresentable {
                 || context.state == .preflightDisk
                 || context.state == .preflightPower
                 || context.state == .rebooting
+            || context.state == .rebootForce
 
             // During forced install — block all quit/hide/close shortcuts
-            if isForcedInstall && event.modifierFlags.contains(.command) {
+            if isForcedInstall && !context.isManualTest && event.modifierFlags.contains(.command) {
                 switch event.keyCode {
                 case 12: // Q — quit
-                    recordTamperAttempt("Cmd+Q blocked")
                     NSLog("[PUSH-UI] Cmd+Q blocked during forced install")
                     return nil
                 case 13: // W — close window
-                    recordTamperAttempt("Cmd+W blocked")
                     NSLog("[PUSH-UI] Cmd+W blocked during forced install")
                     return nil
                 case 4:  // H — hide
-                    recordTamperAttempt("Cmd+H blocked")
                     NSLog("[PUSH-UI] Cmd+H blocked during forced install")
                     return nil
                 case 34: // M — minimize
-                    recordTamperAttempt("Cmd+M blocked")
                     NSLog("[PUSH-UI] Cmd+M blocked during forced install")
                     return nil
                 default:
@@ -360,11 +388,7 @@ private struct WindowConfigurator: NSViewRepresentable {
             }
 
             // Escape only exits when NOT in a forced/active install state
-            if event.keyCode == 53 && isForcedInstall {
-                recordTamperAttempt("Escape blocked")
-                return nil
-            }
-            if event.keyCode == 53 && !isForcedInstall {
+            if event.keyCode == 53 && (!isForcedInstall || context.isManualTest) {
                 Foundation.exit(PushExitCode.dismiss.rawValue)
             }
             return event
@@ -372,5 +396,59 @@ private struct WindowConfigurator: NSViewRepresentable {
 
         // Also override applicationShouldTerminate to block Cmd+Q at app level
         NSApp.disableRelaunchOnLogin()
+    }
+}
+
+
+// Native agent-window presentation avoids relying on WindowGroup auto-opening an LSUIElement app.
+private final class EntraPanel: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+private final class EntraWindowPresenter: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private var panel: NSWindow?
+    private var keyMonitor: Any?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let hosting = NSHostingView(rootView:EntraRegistrationView().environmentObject(context))
+        let width = CGFloat(context.config.ui.popupWidth)
+        let window = EntraPanel(contentRect:NSRect(x:0,y:0,width:width,height:640),styleMask:[.borderless,.fullSizeContentView],backing:.buffered,defer:false)
+        panel = window
+        window.delegate = self
+        window.title = UIState.entraRegistration.windowTitle
+        window.contentView = hosting
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false; window.backgroundColor = .clear
+        window.hasShadow = true; window.alphaValue = 1
+        window.isMovableByWindowBackground = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces,.fullScreenAuxiliary]
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+        if size.height.isFinite && size.height > 1 {
+            window.setContentSize(NSSize(width:width,height:size.height))
+        }
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps:true)
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { event in
+            if event.keyCode == 53 || (event.modifierFlags.contains(.command) && [12,13].contains(event.keyCode)) {
+                Foundation.exit(PushExitCode.dismiss.rawValue)
+            }
+            return event
+        }
+        DispatchQueue.main.async {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.alphaValue = 1
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            if let path = argVal("--ready-file"), window.isVisible {
+                try? "ready\n".write(toFile:path,atomically:true,encoding:.utf8)
+            }
+        }
+    }
+    func windowWillClose(_ notification: Notification) { Foundation.exit(PushExitCode.dismiss.rawValue) }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Foundation.exit(PushExitCode.dismiss.rawValue)
     }
 }

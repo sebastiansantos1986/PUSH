@@ -1,0 +1,133 @@
+PUSH Approved App Updates — engine 1.4.0 / PUSH Admin 0.3.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+TRY THE NEW UI FIRST
+Quit PUSH Admin, then install PUSH-App-Updates-0.3.0.pkg.
+Open /Applications/PUSH Admin.app yourself and select App Updates in the sidebar.
+You can select approved apps, set policy, and click the grouped toast preview.
+Its sample versions are illustrative; all preview buttons are simulated.
+Popup Studio also includes the appUpdates state.
+
+SAFE TERMINAL PREVIEW — NO APP UPDATES
+/Library/Management/PUSH/push-cli --version
+  Expected: push-cli v1.4.0
+sudo /Library/Management/PUSH/push-cli apps preview
+  Shows the grouped sample toast. Later, close, and Update Closed Apps only report
+  the selected button. This command does not run Installomator or update an app.
+
+WHAT IS INCLUDED
+The first catalog supports system-wide copies in /Applications of:
+  chrome    Google Chrome stable
+  firefox   Firefox release channel (ESR and custom channels excluded)
+  vscode    Visual Studio Code stable
+
+Approvals are explicit. Missing apps are not installed. App Store receipts, unexpected
+bundle identities, unverified signatures/publishers, and unverified Firefox channels
+are skipped. Apps managed elsewhere should be left unchecked. This initial release
+is not an automatic updater for every app on the Mac.
+
+Checks read public vendor version metadata and save results independently of macOS
+state in /Library/Management/PUSH/apps-state.json. Checking does not invoke Installomator
+and does not download app installers. The UI reads saved results; Refresh never runs
+an update. Copy check command places the command on the clipboard for you to run.
+
+ACTUAL UPDATES REQUIRE INSTALLomator
+Install a stable Installomator release using its official deployment instructions:
+https://github.com/Installomator/Installomator/releases
+https://github.com/Installomator/Installomator/wiki/Using-Installomator
+
+Installomator is not bundled or automatically installed by this PUSH package.
+The default path is /usr/local/Installomator/Installomator.sh. PUSH requires an
+administrator-owned script and parent directories without group/world write access
+or symlinks before executing it as root. A downloaded script in your user folder does
+not satisfy this requirement. Discovery and preview work without Installomator.
+
+SET UP ONCE
+1. Select the apps you want to manage in App Updates.
+2. Enable approved app management in the draft.
+3. Choose whether CLOSED approved apps may update automatically. This is OFF by default.
+4. Set grace days or deadline overrides. Hourly app reminders are enabled in the draft
+   but run only after app management and monitoring are enabled.
+5. Review Debug > dryRun. Dry-run mode prevents vendor queries, popups, and updates.
+6. Apply the draft in Deployment. Review the OS policy as well: it is preserved.
+7. Enable hourly checks in Deployment when ready for LIVE operation.
+
+The first check runs immediately when YOU enable the schedule. It uses the installed
+configuration, not the unsaved draft. Your existing macOS policy also runs on that
+schedule. Both macOS and app scheduling remain paused immediately after this package
+installation. No app or upgrade is launched by the installer.
+
+OPEN APPS AND DEADLINES
+A single app toast groups pending approved updates. Later dismisses it until the next
+hourly reminder, within working hours and meeting restrictions. It does not extend
+the update deadline or consume a macOS deferral. Close also starts no update.
+
+Update Closed Apps requests real updates from a LIVE notification. PUSH rechecks the
+installed versions, approval policy, publisher identities, open processes, provider
+ownership, and installation locks. It leaves open apps running; save your work and
+close them yourself, then retry. It does not force-quit apps, reopen them, install
+missing apps, or downgrade newer versions. Installomator remains a separately managed
+provider and validates its downloaded packages according to its own supported labels.
+
+Per-app YAML overrides take priority, then the all-app override, then days from first
+detection of a target. Deadlines show urgency/overdue status. This first release does
+not forcibly close open apps after a deadline. If quiet closed-app updates are enabled,
+those apps may update before their deadline. When quiet updates are disabled, a user
+or admin must request installation explicitly.
+
+YAML EXAMPLE — MERGE INTO YOUR EXISTING apps SECTION
+apps:
+  enabled: true
+  approved: "chrome,firefox,vscode"
+  autoUpdateClosed: false
+  notifyHourly: true
+  graceDays: 7
+  deadline: ""
+  chromeDeadline: "2026-12-01T18:00:00Z"
+  firefoxDeadline: ""
+  vscodeDeadline: ""
+  installomatorPath: "/usr/local/Installomator/Installomator.sh"
+
+Your existing update.deadline continues to control macOS only. App deadlines are separate.
+Clear a per-app override to use apps.deadline; clear that to use graceDays.
+
+COMMANDS FOR YOU TO RUN
+/Library/Management/PUSH/push-cli apps status
+  Shows the installed app policy, provider readiness, and saved results.
+sudo /Library/Management/PUSH/push-cli apps check
+  Reads approved installed apps and vendor version feeds; saves results. No installers,
+  no Installomator calls, and no user popup. Works with management paused if approvals exist.
+sudo /Library/Management/PUSH/push-cli apps notify
+  LIVE grouped toast. Selecting Update Closed Apps can update real applications.
+sudo /Library/Management/PUSH/push-cli apps update chrome
+sudo /Library/Management/PUSH/push-cli apps update all --force
+  REAL update requests, for approved, installed, closed apps only. Force does not bypass
+  approval, running-app checks, signatures, dry-run mode, or competing installer locks.
+  A manual update request ignores reminder timing. --force does not mean force-quit.
+Append --dry-run to check/update commands to perform no vendor queries or changes.
+
+VERIFY OUTCOMES
+Review apps status and App Updates > Refresh saved results after running a check or
+update. Successful updates require a verified installed publisher and a version at
+least as new as the discovered target; they are not inferred from an exit code alone.
+Failures are recorded. Automatic attempts back off for an hour; manual requests can retry.
+macOS staging or active package installers defer app work instead of competing with it.
+
+PACKAGE AND VERIFICATION
+This is an unsigned local test installer. The binaries are ad-hoc signed and universal
+for Apple Silicon and Intel. The original Desktop Xcode project is not overwritten.
+Previous engine, config, state, discovery history, and app state are backed up under
+/Library/Management/PUSH-backups. Config, credentials, downloads, and logo are preserved.
+
+Builds and offline tests cover app approvals, policy export, version comparisons,
+feed fixtures, payload validation, preview responses, deadline precedence, and existing
+macOS policy regressions. No PUSH app, vendor app update, Installomator execution,
+real installed-app inventory check, macOS upgrade, or restart was run by Codex.
+Live vendor checks, visual UI testing, and actual update verification remain for you.
+
+PROVIDER REFERENCES
+Installomator: https://github.com/Installomator/Installomator
+Google stable releases: https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions/all/releases
+Mozilla release versions: https://product-details.mozilla.org/1.0/firefox_versions.json
+VS Code stable releases: https://update.code.visualstudio.com/api/releases/stable

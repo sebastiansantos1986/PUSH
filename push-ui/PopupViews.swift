@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: PopupViews.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // PopupViews.swift — All PUSH popup states
 
 import SwiftUI
@@ -11,6 +21,7 @@ struct SoftNudgeView: View {
     @State private var showingReasonSheet = false
     @State private var showingDatePicker  = false
     @State private var selectedReason     = ""
+    @State private var schedulerError = ""
     private var cfg:    UIConfig { ctx.config }
     private var accent: Color    { cfg.accentColor }
 
@@ -25,6 +36,7 @@ struct SoftNudgeView: View {
                 PushDivider()
                 actionBar
             }
+            .disabled(showingDatePicker || showingReasonSheet)
 
             // Deferral reason sheet overlay
             if showingReasonSheet {
@@ -35,8 +47,10 @@ struct SoftNudgeView: View {
                     // Write reason to temp file so CLI can pick it up
                     try? reason.write(toFile: "/tmp/push-deferral-reason",
                                       atomically: true, encoding: .utf8)
+                    showingReasonSheet = false
                     ctx.exit(.defer_)
                 } onCancel: {
+                    ctx.noteAction("Cancel deferral reason")
                     showingReasonSheet = false
                 }
                 .transition(.scale(scale: 0.95).combined(with: .opacity))
@@ -48,18 +62,27 @@ struct SoftNudgeView: View {
                     .ignoresSafeArea()
                     .onTapGesture { showingDatePicker = false }
                 DatePickerSheet(config: cfg,
-                                deadline: cfg.deadlineDate ?? Date().addingTimeInterval(7 * 86400)) { chosenDate in
+                                deadline: reminderTestDeadline(configured: cfg.deadlineDate, manualTest: ctx.isManualTest)) { chosenDate in
                     // Write chosen date to temp file so CLI can pick it up
                     let iso = ISO8601DateFormatter().string(from: chosenDate)
-                    try? iso.write(toFile: "/tmp/push-scheduled-until",
-                                   atomically: true, encoding: .utf8)
+                    do {
+                        try iso.write(toFile: "/tmp/push-scheduled-until", atomically: true, encoding: .utf8)
+                    } catch {
+                        schedulerError = "The reminder could not be saved. Please try again or contact IT."
+                        return
+                    }
+                    showingDatePicker = false
                     ctx.exit(.scheduledDefer)
                 } onCancel: {
+                    ctx.noteAction("Cancel schedule")
                     showingDatePicker = false
                 }
                 .transition(.scale(scale: 0.95).combined(with: .opacity))
             }
         }
+        .alert("Reminder not saved", isPresented: Binding(get: { !schedulerError.isEmpty }, set: { if !$0 { schedulerError = "" } })) {
+            Button("OK") { schedulerError = "" }
+        } message: { Text(schedulerError) }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showingReasonSheet)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: showingDatePicker)
     }
@@ -108,6 +131,7 @@ struct SoftNudgeView: View {
             if ctx.deferralsLeft > 0 {
                 Button(cfg.ui.deferButtonLabel) {
                     if cfg.ui.requireDeferralReason {
+                        ctx.noteAction("Open deferral reasons")
                         showingReasonSheet = true
                     } else {
                         ctx.exit(.defer_)
@@ -116,7 +140,7 @@ struct SoftNudgeView: View {
                 .buttonStyle(PushSecondaryButtonStyle())
 
                 // Schedule button — user picks specific date/time, no deferral cost
-                Button("Schedule…") { showingDatePicker = true }
+                Button("Schedule…") { ctx.noteAction("Open scheduler"); showingDatePicker = true }
                     .buttonStyle(PushSecondaryButtonStyle())
             } else {
                 Text("No deferrals remaining")
@@ -270,235 +294,116 @@ struct HardBlockView: View {
 
 struct ToastView: View {
     @EnvironmentObject var ctx: UIContext
-    @State private var visible:      Bool   = false
-    @State private var hovering:     Bool   = false
-    @State private var secondsLeft:  Int    = 60
+    @State private var visible = false
+    @State private var hovering = false
+    @State private var secondsLeft = 0
+    @State private var autoClosed = false
+    private var toast: UIConfig.ToastCfg { ctx.config.toast }
+    private var accent: Color { ctx.config.accentColor }
+    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    private var toast:  UIConfig.ToastCfg { ctx.config.toast }
-    private var accent: Color             { ctx.config.accentColor }
-    private let tick = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-
-    private var slideOffset: CGSize {
-        switch toast.position {
-        case "topLeft", "bottomLeft": return CGSize(width: -50, height: 0)
-        default:                      return CGSize(width:  50, height: 0)
-        }
+    private var message: String {
+        if let custom = toast.message, !custom.isEmpty { return custom.resolvedNewlines }
+        return ctx.config.isMajor
+            ? "A macOS upgrade is ready. Save your work and choose when to begin."
+            : "A macOS security update is ready. Save your work before installing."
     }
-
-    // Get first name of logged-in user for personalized greeting
-    private var firstName: String {
-        let fullName = NSFullUserName()
-        return fullName.components(separatedBy: " ").first ?? fullName
+    private var deadlineLabel: String? {
+        guard let date = ctx.config.deadlineDate else { return nil }
+        if date < Date() { return "Deadline passed" }
+        if Calendar.current.isDateInToday(date) { return "Due today" }
+        return "Due " + date.formatted(date: .abbreviated, time: .omitted)
     }
-
-    // Title: "macOS Tahoe 26.4 Available"
-    private var toastTitle: String {
-        "\(ctx.config.friendlyTargetVersion) Available"
+    private var slideOffset: CGFloat {
+        ["topLeft", "bottomLeft"].contains(toast.position) ? -18 : 18
     }
-
-    // Subtitle under title — escalates as deadline approaches
-    private var toastSubtitle: String { toastSubtitleDynamic }
-
-    // Days remaining until deadline — used for urgency tier
-    private var daysRemaining: Int {
-        guard let deadline = ctx.config.deadlineDate else { return 99 }
-        let diff = Calendar.current.dateComponents([.day], from: Date(), to: deadline)
-        return max(0, diff.day ?? 0)
-    }
-
-    // Body message — uses toast.message from config if set, otherwise builds tier-based default
-    private var bodyText: String {
-        // Admin custom message overrides everything
-        if let custom = ctx.config.toast.message, !custom.isEmpty {
-            return custom.resolvedNewlines
-        }
-
-        let name    = firstName.isEmpty ? "there" : firstName
-        let days    = daysRemaining
-        let isMajor = ctx.config.isMajor
-        let version = ctx.config.friendlyTargetVersion
-        let kind    = isMajor ? "upgrade" : "update"
-        let time    = isMajor ? "30–45 minutes" : "15–20 minutes"
-
-        // ── 🔴 Final Warning — deadline is today or tomorrow ─────────────────
-        if days <= 1 {
-            let urgency = days == 0
-                ? "⚠️ Your macOS \(kind) will install automatically today."
-                : "⚠️ Your macOS \(kind) deadline is tomorrow."
-            return """
-Hello \(name),
-
-\(urgency)
-
-Once the deadline passes, the installation will begin automatically without further notice. Please save any open work now.
-
-⏰ Time remaining: \(days == 0 ? "Less than 24 hours" : "1 day")
-🔒 Required by IT Security Policy
-🔄 Your Mac will restart automatically when the update begins
-"""
-        }
-
-        // ── 🟡 Urgent — 2 days left ──────────────────────────────────────────
-        if days <= 2 {
-            return """
-Hello \(name),
-
-Your macOS \(kind) deadline is approaching. \(version) is required by IT and must be installed within the next \(days) day\(days == 1 ? "" : "s").
-
-After the deadline, the installation will begin automatically.
-
-⏰ \(days) day\(days == 1 ? "" : "s") remaining
-🔒 Required by IT — no further deferrals after deadline
-⏱️ Installation takes approximately \(time)
-
-Please install at your earliest convenience to avoid interruption.
-"""
-        }
-
-        // ── 🟢 Normal — plenty of time ───────────────────────────────────────
-        let updateLine = isMajor
-            ? "\(version) is a major macOS upgrade required by IT to keep your Mac secure and supported."
-            : "A required security update (\(version)) is available for your Mac."
-
-        return """
-Hello \(name),
-
-\(updateLine)
-
-What to expect:
-• Installation takes approximately \(time)
-• Your files, apps, and settings will be preserved
-• Your Mac will restart automatically when ready
-
-⏰ \(days) days remaining before automatic installation
-🔒 Required by IT Security Policy
-
-Please save your work and install when convenient.
-"""
-    }
-
-    // Toast subtitle changes based on urgency
-    private var toastSubtitleDynamic: String {
-        let days = daysRemaining
-        if days <= 1 { return "⚠️ Final Warning — Install Today" }
-        if days <= 2 { return "Deadline Approaching — \(days) Day\(days == 1 ? "" : "s") Left" }
-        return ctx.config.isMajor ? "Major Upgrade Required" : "Security Update Required"
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-
-            // ── Header ─────────────────────────────────────────────────────
-            HStack(alignment: .top, spacing: 12) {
-                AppIconView(config: ctx.config, size: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(toastTitle)
-                        .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 12) {
+                AppIconView(config: ctx.config, size: 46)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Software Update")
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.primary)
-                        .lineLimit(2)
-                    Text(toastSubtitle)
-                        .font(.system(size: 12))
+                    Text(ctx.config.friendlyTargetVersion)
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 if toast.showCloseButton {
                     Button { ctx.exit(.dismiss) } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.primary.opacity(0.12))
-                                .frame(width: 24, height: 24)
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Color.secondary)
-                        }
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(Color.primary.opacity(0.07))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .help("Dismiss this reminder")
+                    .accessibilityLabel("Dismiss this reminder")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-
-            PushDivider()
-
-            // ── Body — no lineLimit so full message always shows ───────────
-            Text(bodyText)
+            Text(message)
                 .font(.system(size: 13))
-                .foregroundStyle(.primary.opacity(0.85))
-                .lineSpacing(4)
+                .foregroundStyle(.primary)
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-
-            PushDivider()
-
-            // ── Action bar ─────────────────────────────────────────────────
-            HStack(spacing: 10) {
-                // Countdown timer bottom left
-                HStack(spacing: 5) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 11))
-                        .foregroundStyle(secondsLeft < 15 ? Color.red : Color.orange)
-                    Text("\(secondsLeft)s")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(secondsLeft < 15 ? Color.red : Color.orange)
+            HStack(spacing: 8) {
+                Label("Restart required", systemImage: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                if let deadlineLabel {
+                    Text(deadlineLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(ctx.config.deadlineDate.map { $0 < Date() } == true ? Color.orange : accent)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(accent.opacity(0.08))
+                        .clipShape(Capsule())
                 }
-                .opacity(hovering ? 0.5 : 1.0)
-
-                Spacer()
-
-                if ctx.deferralsLeft > 0 && toast.showDeferButton {
+            }
+            Rectangle().fill(Color.primary.opacity(0.09)).frame(height: 1)
+            HStack(spacing: 10) {
+                if toast.showDeferButton {
                     Button { ctx.exit(.defer_) } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "clock.arrow.2.circlepath")
-                                .font(.system(size: 11))
-                            Text(toast.deferButtonLabel)
-                                .font(.system(size: 13, weight: .medium))
-                        }
+                        Text(toast.deferButtonLabel.isEmpty ? "Later" : toast.deferButtonLabel)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(PushToastSecondaryStyle())
+                    .accessibilityHint("Close this reminder without requesting installation")
                 }
-
-                Button {
-                    // Write action file so the CLI knows user clicked Install from toast
-                    try? "install".write(toFile: "/tmp/push-toast-action",
-                                         atomically: true, encoding: .utf8)
-                    ctx.exit(.install)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 13))
-                        Text(toast.installButtonLabel)
-                            .font(.system(size: 13, weight: .semibold))
-                    }
+                Button { ctx.exit(.install) } label: {
+                    Text(toast.installButtonLabel.isEmpty ? "Install Now" : toast.installButtonLabel)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PushToastPrimaryStyle(color: accent))
-                .keyboardShortcut(.return)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            if (toast.autoDismissSeconds ?? 0) > 0 {
+                Text(hovering ? "Reminder stays open while you hover" : "Closes in \(secondsLeft) seconds")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }
-        .frame(width: CGFloat(toast.width))
-        .background(
-            RoundedRectangle(cornerRadius: CGFloat(toast.cornerRadius))
-                .fill(Color(NSColor.windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CGFloat(toast.cornerRadius))
-                .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(0.20), radius: 20, x: 0, y: 6)
-        .clipShape(RoundedRectangle(cornerRadius: CGFloat(toast.cornerRadius)))
+        .padding(18)
+        .frame(width: CGFloat(min(700, max(300, toast.width))))
+        .background(PopupSurface())
+        .clipShape(RoundedRectangle(cornerRadius: CGFloat(max(8, toast.cornerRadius))))
+        .overlay(RoundedRectangle(cornerRadius: CGFloat(max(8, toast.cornerRadius))).stroke(Color.primary.opacity(0.14), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.22), radius: 20, x: 0, y: 8)
         .opacity(visible ? 1 : 0)
-        .offset(x: visible ? 0 : slideOffset.width)
+        .offset(x: visible ? 0 : slideOffset)
         .onAppear {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) { visible = true }
+            autoClosed = false
+            secondsLeft = max(0, toast.autoDismissSeconds ?? 0)
+            withAnimation(.easeOut(duration: 0.2)) { visible = true }
             if !toast.soundName.isEmpty { NSSound(named: toast.soundName)?.play() }
         }
         .onReceive(tick) { _ in
-            guard !hovering else { return }
+            guard !autoClosed, !hovering, (toast.autoDismissSeconds ?? 0) > 0 else { return }
             if secondsLeft > 0 { secondsLeft -= 1 }
+            if secondsLeft == 0 { autoClosed = true; ctx.exit(.toastTimeout, automatic: true) }
         }
         .onHover { hovering = $0 }
     }
@@ -564,7 +469,7 @@ struct DownloadView: View {
             liveSubtitle = ctx.downloadSubtitle
         }
         .onReceive(timer) { _ in
-            if let raw = try? String(contentsOfFile: "/tmp/push-download-progress",
+            if let raw = try? String(contentsOfFile: "/private/var/run/com.push/download-progress",
                                      encoding: .utf8) {
                 let parts = raw.components(separatedBy: "\n")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -589,7 +494,7 @@ struct InstallingView: View {
     private let poller = Timer.publish(every: 1.5,  on: .main, in: .common).autoconnect()
     private let pulser = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
     // Both native (quick-restart) and startosinstall paths write to this file
-    private let progressFile = "/tmp/push-install-progress"
+    private let progressFile = "/private/var/run/com.push/install-progress"
 
     var body: some View {
         PopupCard(width: CGFloat(ctx.config.ui.popupWidth)) {
@@ -709,7 +614,7 @@ struct RebootingView: View {
         }
         .onReceive(timer) { _ in
             if secondsLeft > 0 { secondsLeft -= 1 }
-            else { ctx.exit(.install) }
+            else { ctx.exit(.install, automatic: true) }
         }
     }
 }
@@ -721,7 +626,8 @@ struct CompliantView: View {
 
     var body: some View {
         PopupCard(width: CGFloat(ctx.config.ui.popupWidth)) {
-            PopupHeader(config: ctx.config, subtitle: "Up to Date")
+            PopupHeader(config: ctx.config, subtitle: "Up to Date",
+                        title: ctx.config.ui.appName == "Software Update Required" ? "Software Update" : ctx.config.ui.appName)
             PushDivider()
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.circle.fill")
@@ -879,7 +785,7 @@ struct PowerWaitView: View {
             if secondsLeft > 0 {
                 secondsLeft -= 1
             } else {
-                ctx.exit(.powerTimeout)
+                ctx.exit(.powerTimeout, automatic: true)
             }
         }
         .onReceive(poll) { _ in
@@ -917,11 +823,12 @@ struct PowerWaitView: View {
     }
 
     private func checkPower() {
+        guard !ctx.isManualTest else { return }
         guard isOnACPower() else { return }
         powerFound   = true
         statusText   = "Power detected — continuing…"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            ctx.exit(.install)
+            ctx.exit(.install, automatic: true)
         }
     }
 
@@ -943,6 +850,9 @@ struct PowerWaitView: View {
 
 struct DiskSpaceView: View {
     @EnvironmentObject var ctx: UIContext
+    @State private var actionError = ""
+    @State private var showActionError = false
+    private var supportURL: URL? { supportContactURL(email:ctx.config.ui.itContactEmail, website:ctx.config.ui.helpURL) }
     private var accent: Color { ctx.config.accentColor }
 
     private var neededGB:  Double { ctx.diskRequiredGB }
@@ -1026,14 +936,14 @@ struct DiskSpaceView: View {
 
             // Footer buttons
             HStack(spacing: 10) {
-                Button("Contact IT") { ctx.exit(.dismiss) }
+                Button(supportURL == nil ? "Close" : "Contact IT") { openSupport() }
                     .buttonStyle(PushSecondaryButtonStyle())
                 Spacer()
                 Button(action: openStorageSettings) {
                     HStack(spacing: 6) {
                         Image(systemName: "internaldrive")
                             .font(.system(size: 13, weight: .semibold))
-                        Text("Open Storage Settings")
+                        Text(ctx.config.preflight.diskSpaceLearnMoreURL.isEmpty ? "Open Storage Settings" : "Storage Help")
                             .font(.system(size: 13, weight: .semibold))
                     }
                 }
@@ -1042,6 +952,9 @@ struct DiskSpaceView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
+        .alert("Could not open the requested destination", isPresented:$showActionError) {
+            Button("OK", role:.cancel) { ctx.noteAction("Acknowledge action error") }
+        } message: { Text(actionError) }
     }
 
     private func tipRow(symbol: String, color: Color, text: String) -> some View {
@@ -1059,13 +972,21 @@ struct DiskSpaceView: View {
         .padding(.vertical, 10)
     }
 
+    private func openSupport() {
+        guard let url = supportURL else { ctx.exit(.dismiss); return }
+        if NSWorkspace.shared.open(url) { ctx.exit(.contactSupport) }
+        else { actionError = "No application could open your configured IT contact. Contact your IT team directly."; showActionError = true }
+    }
     private func openStorageSettings() {
-        if !ctx.config.preflight.diskSpaceLearnMoreURL.isEmpty,
-           let url = URL(string: ctx.config.preflight.diskSpaceLearnMoreURL) {
-            NSWorkspace.shared.open(url)
-        } else if let url = URL(string: "x-apple.systempreferences:com.apple.settings.Storage") {
-            NSWorkspace.shared.open(url)
+        let configured = ctx.config.preflight.diskSpaceLearnMoreURL
+        let url: URL?
+        if configured.isEmpty { url = URL(string:"x-apple.systempreferences:com.apple.settings.Storage") }
+        else if let candidate = URL(string:configured), candidate.scheme == "https", candidate.host != nil { url = candidate }
+        else { url = nil }
+        guard let url, NSWorkspace.shared.open(url) else {
+            actionError = "Storage Settings could not be opened. Open System Settings > General > Storage manually."; showActionError = true; return
         }
+        ctx.noteAction(ctx.config.preflight.diskSpaceLearnMoreURL.isEmpty ? "Open Storage Settings" : "Storage Help")
     }
 }
 
@@ -1085,7 +1006,7 @@ struct PasswordView: View {
             PushDivider()
             VStack(spacing: 16) {
                 Text(config.ui.passwordPromptMessage.isEmpty
-                         ? "Enter the password for \(localAccount.isEmpty ? "your account" : "\\(localAccount)") to install the update.\n\nYour password will be saved securely so future updates can install automatically."
+                         ? "Enter the password for \(localAccount.isEmpty ? "your account" : localAccount) to install the update.\n\nYour password will be saved securely in your login keychain so future updates can install automatically."
                          : config.ui.passwordPromptMessage.resolvedNewlines)
                     .font(.system(size: 13))
                     .foregroundStyle(Color(NSColor.secondaryLabelColor))
@@ -1124,11 +1045,16 @@ struct PasswordView: View {
     }
 
     private func submit() {
+        guard allowsUserPasswordPrompts else {
+            password = ""
+            errorMsg = "Password collection is disabled. Contact IT for managed authorization."
+            return
+        }
         guard !password.isEmpty else { return }
         validating = true
         errorMsg   = ""
 
-        // Validate password against the local account using dscl
+        // Validate password against the local account using OpenDirectory
         let account = localAccount
         let pwd     = password
 
@@ -1137,9 +1063,10 @@ struct PasswordView: View {
             DispatchQueue.main.async {
                 validating = false
                 if valid {
-                    // Hand the validated password back to push-cli. The root
-                    // daemon stores it once in the System Keychain.
-                    if writePasswordHandoffForRoot(account: account, password: pwd) {
+                    // Save to user's login keychain for future automatic installs.
+                    // This is the disclosed behavior per the prompt text. Failure
+                    // here blocks the handoff so no plaintext fallback is needed.
+                    if saveUserPasswordToLoginKeychain(account: account, password: pwd) {
                         ctx.exit(.install)
                     } else {
                         password = ""
@@ -1184,23 +1111,10 @@ struct PasswordView: View {
         return ""
     }
 
-    /// Validate a local account password using dscl.
-    /// Returns true if correct, or true if no account configured (cannot validate).
+    /// Validate a local account password using OpenDirectory.
+    /// Missing accounts and authentication errors fail closed.
     private func validatePassword(account: String, password: String) -> Bool {
-        guard !account.isEmpty else { return true }
-        let process = Process()
-        process.launchPath = "/usr/bin/dscl"
-        process.arguments  = ["/Local/Default", "-authonly", account, password]
-        let devnull = FileHandle(forWritingAtPath: "/dev/null") ?? FileHandle.standardError
-        process.standardOutput = devnull
-        process.standardError  = devnull
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
+        return verifyLocalPassword(account: account, password: password)
     }
 }
 
@@ -1324,12 +1238,108 @@ struct RebootForceView: View {
                 if remaining > 0 { remaining -= 1 }
                 if remaining == 0 {
                     timer?.invalidate()
-                    ctx.exit(.install)
+                    ctx.exit(.install, automatic: true)
                 }
             }
         }
         .onDisappear {
             timer?.invalidate()
         }
+    }
+}
+
+// MARK: - Grouped application update toast
+// Developer: Sebastian Santos
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+struct AppUpdatesToast: View {
+    @EnvironmentObject var ctx: UIContext
+    private var accent: Color { ctx.config.accentColor }
+    var body: some View {
+        VStack(alignment:.leading,spacing:16) {
+            HStack(spacing:12) {
+                AppIconView(config:ctx.config,size:44)
+                VStack(alignment:.leading,spacing:3) {
+                    Text("App updates available").font(.system(size:15,weight:.bold))
+                    Text("\(ctx.appUpdates.count) approved apps · save your work").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength:4)
+                Button { ctx.exit(.dismiss) } label: { Image(systemName:"xmark").frame(width:28,height:28) }
+                    .buttonStyle(.plain).accessibilityLabel("Dismiss app updates")
+            }
+            if ctx.isManualTest {
+                Text("PREVIEW · Sample versions. No software will be updated.").font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(ctx.appUpdates) { app in
+                VStack(alignment:.leading,spacing:4) {
+                    HStack { Text(app.name).font(.system(size:13,weight:.semibold)); Spacer(); Image(systemName:"arrow.down.circle").foregroundStyle(accent) }
+                    Text("\(app.installed) → \(app.target)").font(.system(size:11,design:.monospaced)).foregroundStyle(.secondary)
+                    if let deadline = ISO8601DateFormatter().date(from:app.deadline) {
+                        Text(deadline < Date() ? "Update overdue" : "Due " + deadline.formatted(date:.abbreviated,time:.omitted))
+                            .font(.caption2).foregroundStyle(deadline < Date() ? Color.orange : .secondary)
+                    }
+                }.padding(12).background(Color.primary.opacity(0.045)).clipShape(RoundedRectangle(cornerRadius:10))
+            }
+            Text("Close open apps when you're ready. PUSH updates closed apps and leaves your work open.")
+                .font(.system(size:12)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+            HStack(spacing:10) {
+                Button("Later") { ctx.exit(.defer_) }.buttonStyle(PushToastSecondaryStyle())
+                Button("Update Closed Apps") { ctx.exit(.install) }.buttonStyle(PushToastPrimaryStyle(color:accent))
+            }
+        }
+        .padding(20)
+        .frame(width:CGFloat(min(700,max(300,ctx.config.toast.width))))
+        .background(PopupSurface())
+        .clipShape(RoundedRectangle(cornerRadius:16))
+        .overlay(RoundedRectangle(cornerRadius:16).stroke(Color.primary.opacity(0.12)))
+        .shadow(color:.black.opacity(0.20),radius:20,y:8)
+    }
+}
+
+// MARK: - Microsoft Entra registration reminder
+// Developer: Sebastian Santos
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+struct EntraRegistrationView: View {
+    @EnvironmentObject var ctx: UIContext
+    @State private var supportError = false
+    private var notice: EntraNotice { ctx.entraNotice }
+    private var supportURL: URL? { supportContactURL(email:ctx.config.ui.itContactEmail,website:ctx.config.ui.helpURL) }
+    var body: some View {
+        PopupCard(width:CGFloat(ctx.config.ui.popupWidth)) {
+            HStack(spacing:14) {
+                AppIconView(config:ctx.config,size:48)
+                VStack(alignment:.leading,spacing:4) {
+                    Text("Microsoft Entra Registration").font(.system(size:17,weight:.bold))
+                    Text(notice.heading).font(.system(size:12,weight:.medium)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength:0)
+                Button { ctx.exit(.dismiss) } label: { Image(systemName:"xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain).accessibilityLabel("Close registration reminder")
+            }.padding(22)
+            PushDivider()
+            VStack(alignment:.leading,spacing:18) {
+                if ctx.isManualTest { Text("PREVIEW · Self Service will not open. No registration or inventory changes.").font(.caption).foregroundStyle(.secondary) }
+                Label("Register this Mac with your organization",systemImage:"person.crop.circle.badge.checkmark").font(.headline)
+                Text(notice.message).font(.system(size:14)).fixedSize(horizontal:false,vertical:true)
+                HStack {
+                    Label("Reminder stage \(notice.stage) of 4",systemImage:"bell.badge").font(.caption)
+                    Spacer()
+                    Text("Later selected \(notice.laterCount) times").font(.caption).foregroundStyle(.secondary)
+                }.padding(12).background(ctx.config.accentColor.opacity(0.07)).clipShape(RoundedRectangle(cornerRadius:10))
+                Text("Register Now opens the registration policy in Self Service. Follow the instructions there; PUSH does not collect your password.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
+            }.padding(22)
+            PushDivider()
+            HStack(spacing:10) {
+                Button("Later") { ctx.exit(.defer_) }.buttonStyle(PushSecondaryButtonStyle())
+                if let supportURL {
+                    Button("Contact IT") {
+                        if ctx.isPreview || ctx.isManualTest { ctx.exit(.contactSupport) }
+                        else if NSWorkspace.shared.open(supportURL) { ctx.exit(.contactSupport) }
+                        else { supportError = true }
+                    }.buttonStyle(PushSecondaryButtonStyle())
+                }
+                Spacer(minLength:0)
+                Button("Register Now") { ctx.exit(.install) }.buttonStyle(PushPrimaryButtonStyle(color:ctx.config.accentColor))
+            }.padding(20)
+        }
+        .alert("Could not open IT contact",isPresented:$supportError) { Button("OK",role:.cancel) {} } message: { Text("Please contact your organization's IT team directly.") }
     }
 }

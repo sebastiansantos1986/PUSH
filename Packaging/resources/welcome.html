@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,sans-serif;font-size:14px;line-height:1.5;padding:12px}h1{font-size:24px}</style></head><body>
+<h1>PUSH 1.6.0 — Readiness Reporting</h1>
+<p>Developer: Sebastian Santos</p>
+<p>Adds passive scheduled/manual check history for the PUSH Admin readiness dashboard. Existing config repairs, popup previews and update safeguards are retained.</p>
+<p>Installs the repaired PUSH command-line tool and popup app for Apple Silicon and Intel Macs running macOS 14 or later.</p>
+<p>Your previous PUSH binaries, settings, state, and daemon definition are backed up under <b>/Library/Management/PUSH-backups</b>. Your existing configuration and Keychain credentials are preserved.</p>
+<p><b>The existing automatic schedule will be paused.</b> Installation does not launch PUSH, contact Jamf, download macOS, install an upgrade, or restart your Mac. It refuses to proceed while a known installer or download process is running.</p>
+<p>After installation, follow the included test instructions. Automatic scheduling can be enabled separately after local verification.</p>
+<p>This package is an unsigned local test build of the repaired source branch. It is not the previous 1.1.7 release rebuilt, and is not signed or notarized for fleet deployment.</p>
+<p>End-user password prompts and automatic user-login-password capture are disabled. Keychain checks run without interaction. If managed authorization is unavailable, installation waits for IT.</p></body></html>

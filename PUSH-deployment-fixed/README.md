@@ -1,3 +1,5 @@
+> Historical 1.1.7 deployment integration. The current 1.6.0 local-test installer is built with `Packaging/build-local-package.sh`; see the repository README before deploying. This legacy flow has not been validated against 1.6.0.
+
 # PUSH Deployment Guide
 
 ## Files in this package

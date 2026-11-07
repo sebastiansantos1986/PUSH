@@ -1,11 +1,11 @@
 # PUSH Roadmap
 
 This document tracks what has been completed and what remains to be built.
-Last updated: July 2026 — v1.1.7 production candidate
+Last updated: April 2026 — v1.1.0
 
 ---
 
-## ✅ Completed (v1.1.7)
+## ✅ Completed (v1.1.0)
 
 ### Core Install Workflow
 - [x] Update detection via `mdmclient` + `softwareupdate`
@@ -36,8 +36,6 @@ Last updated: July 2026 — v1.1.7 production candidate
 - [x] `\n` newline support in all message fields
 - [x] Auto-sizing toast height based on content
 - [x] Solid opaque card design (no glass/transparency issues)
-- [x] Forced update UI watchdog relaunches locked progress window if `push-ui` is killed
-- [x] Tamper logging for blocked close/quit/hide/minimize/Escape attempts
 
 ### Schedule & Timing
 - [x] Nudge once per day (24h lock before popup opens)
@@ -58,12 +56,6 @@ Last updated: July 2026 — v1.1.7 production candidate
 - [x] System Keychain credential storage (`push-cli auth`)
 - [x] Password priority: Keychain → config.yaml → prompt user
 - [x] No deprecated SecKeychain APIs (uses `security` CLI)
-- [x] User password capture-once flow stores successful handoff in System Keychain
-
-### Compliance Wallpaper
-- [x] Non-compliant wallpaper applies while Mac is below target
-- [x] Compliant wallpaper only replaces PUSH's own non-compliant wallpaper
-- [x] User-selected wallpaper is preserved once the Mac is compliant
 
 ### Jamf Integration
 - [x] Extension Attribute reporting after every auto-check
@@ -86,7 +78,6 @@ Last updated: July 2026 — v1.1.7 production candidate
 - [x] `self-update --check`
 - [x] `mdm push / download / check / recon / fix-swu`
 - [x] `grace grant / status / revoke`
-- [x] `reboot status / check / nudge / force / reset / now`
 - [x] `debug on / off / status`
 
 ### Deployment
@@ -120,11 +111,11 @@ Last updated: July 2026 — v1.1.7 production candidate
 - [ ] Add `self-update --check` to Jamf EA for version tracking
 
 ### Jamf EA — Richer Fleet Data
-- [x] EA script coverage for compliance, deadlines, deferrals, health, and reboot status
-- [x] EA for PUSH version installed via Health EA
+- [ ] EA script to pull `state.json` fields (deferral count, last nudge, install started)
+- [ ] EA for PUSH version installed (useful for tracking rollout)
 - [ ] EA for next deadline date
-- [x] Jamf Smart Group: "PUSH Not Installed"
 - [ ] Jamf Smart Group: "PUSH Deadline This Week"
+- [ ] Jamf Smart Group: "PUSH Not Installed"
 
 ### Fleet Dashboard
 - [ ] Decide on infrastructure (AWS Lambda + S3, or existing web server)
@@ -164,9 +155,9 @@ The per-machine data exists in `state.json` and logs. Need a central collector.
 Simplest path: AWS API Gateway + Lambda + DynamoDB, each Mac POSTs after auto-check.
 
 **Files to know:**
-- Source: repository root — Xcode project
+- Source: `PUSH-fixed/` — Xcode project
 - Deployment: `PUSH-deployment-fixed/` — pkg build scripts
-- DerivedData: `~/Library/Developer/Xcode/DerivedData/PUSH-*/Build/Products/Debug`
+- DerivedData: `/Users/sebastian.santos/Library/Developer/Xcode/DerivedData/PUSH-cnhckvdfyqdhccbsqgurbxciigjw/Build/Products/Debug`
 
 **Deploy command:**
 ```bash

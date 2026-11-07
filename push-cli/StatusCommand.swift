@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: StatusCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // StatusCommand.swift — Compliance status, check, and reset
 
 import Foundation
@@ -35,8 +45,13 @@ struct StatusCommand {
         if let c = config {
             cliSection("Config")
             cliDivider()
+            cliInfo("Discovery policy:", c.auto.trackLatest ? (c.auto.minorOnly ? "Latest in current major" : "Latest compatible macOS") : "Configured target / legacy detection")
+            cliInfo("Deadline source:", c.update.deadline.isEmpty ? "Automatic from first detection" : "YAML override")
+            cliInfo("Last discovery:", state.lastDiscoveryDate.map(describeDate) ?? "Not yet checked")
+            if let error = state.lastDiscoveryError, !error.isEmpty { cliInfo("Discovery issue:", error) }
+            if let recovery = state.lastRecoveryMessage { cliInfo("State recovery:", recovery) }
             cliInfo("Release type:",    c.update.releaseType)
-            cliInfo("Deadline:",        c.update.deadline.isEmpty ? "(none)" : c.update.deadline)
+            cliInfo("Deadline:",        c.effectiveDeadline.isEmpty ? "(none)" : c.effectiveDeadline)
             cliInfo("Past deadline:",   c.isPastDeadline ? "\u{001B}[31mYES\u{001B}[0m" : "No")
             cliInfo("Toast interval:",  "\(formatInterval(Int(c.toastIntervalSeconds))) (every \(c.update.toastIntervalSeconds)s)")
             cliInfo("Nudge interval:",  "\(formatInterval(Int(c.nudgeIntervalSeconds))) (every \(c.update.nudgeIntervalSeconds)s)")
@@ -55,6 +70,21 @@ struct StatusCommand {
             if c.debug.testNudgeIntervalMinutes > 0 {
                 cliInfo("Test nudge interval:", "\(c.debug.testNudgeIntervalMinutes) minutes")
             }
+        }
+
+        if let c = config {
+            cliSection("Approved app updates")
+            cliInfo("Enabled:", String(c.apps.enabled))
+            cliInfo("Approved apps:", c.apps.approved.isEmpty ? "None" : c.apps.approved)
+            cliInfo("Quiet closed-app updates:", String(c.apps.autoUpdateClosed))
+            cliInfo("App report:", managedBase + "/apps-state.json")
+        }
+
+        if let c = config {
+            cliSection("Entra registration")
+            cliInfo("Reminders enabled:",String(c.entra.enabled))
+            cliInfo("Registration monitor:",FileManager.default.fileExists(atPath:EntraNudgeCommand.plist) ? "Installed — 5-minute checks with per-stage prompt limits" : "Not installed")
+            cliInfo("Details:","push-cli entra status (local evidence; cloud compliance not assessed)")
         }
 
         // Daemon status
@@ -84,18 +114,18 @@ struct StatusCommand {
         cliDivider()
         if let cfg = config {
             let account = cfg.auth.localAccount
-            cliInfo("Account:", account.isEmpty ? "(not set — uses console user)" : account)
-            cliInfo("Keychain:", keychainPasswordExists() ? "✅ Password stored" : "(not set — will prompt user)")
+            cliInfo("Account:", account.isEmpty ? "(not set — IT authorization needs configuration)" : account)
+            cliInfo("User password prompts:", "Disabled")
+            cliInfo("Keychain:", keychainPasswordExists() ? "✅ Password stored" : "Unavailable without interaction — IT setup needed")
             if !cfg.auth.localPassword.isEmpty {
                 cliWarning("Plain text password in config.yaml — migrate: sudo push-cli auth set-password")
             }
 
             // Apple Silicon auth status
             if isAppleSilicon() {
-                let authMethod = selectAuthMethod(config: cfg)
-                cliInfo("Auth method:", authMethod.rawValue)
+                cliInfo("Auth policy:", cfg.jamf.laps.enabled ? "Managed Jamf LAPS configured; availability checked at install time" : "Managed credentials or MDM required; no user prompt fallback")
                 let btEscrowed = isBootstrapTokenEscrowed()
-                cliInfo("Bootstrap Token:", btEscrowed ? "✅ Escrowed to MDM" : "⚠️  Not escrowed — password required")
+                cliInfo("Bootstrap Token:", btEscrowed ? "✅ Escrowed to MDM" : "Not detected — IT must provision unattended authorization")
                 let stEnabled = consoleUserHasSecureToken()
                 cliInfo("Secure Token:", stEnabled ? "✅ Enabled for console user" : "⚠️  Not enabled — install may fail")
             }
@@ -173,8 +203,7 @@ struct ResetCommand {
 
         // Clear install flags only — no python3 needed, no Xcode CLT required
         if installOnly {
-            state.installStarted   = false
-            state.installCompleted = false
+            state.failInstallation()
             try? saveState(state)
             cliSuccess("Install state cleared (installStarted=false, installCompleted=false)")
             return

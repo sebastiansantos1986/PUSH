@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: LogCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // LogCommand.swift — Log management, LaunchDaemon install/uninstall
 
 import Foundation
@@ -90,6 +100,7 @@ struct InstallDaemonCommand {
     <array>
         <string>\(binary)</string>
         <string>auto-check</string>
+        <string>--scheduled</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -118,6 +129,9 @@ struct InstallDaemonCommand {
             shell("ln -sf \"\(binary)\" /usr/local/bin/push-cli 2>/dev/null || true")
 
             if status == 0 {
+                RuntimeHealthScope.monitorIntent("main",desired:"enabled",reason:"Administrator enabled macOS/app monitoring")
+                if (try? loadConfig())?.entra.enabled == true { _ = EntraNudgeCommand.installSchedule() }
+
                 cliSuccess("LaunchDaemon installed — runs every \(formatInterval(interval))")
                 cliPrint("")
                 cliInfo("Label:",    label)
@@ -181,8 +195,10 @@ struct UninstallDaemonCommand {
             cliError("uninstall-daemon requires root. Run: sudo push-cli uninstall-daemon"); exit(1)
         }
 
+        EntraNudgeCommand.uninstallSchedule()
         shell("launchctl bootout system \"\(plistPath)\" 2>/dev/null || true")
 
+        RuntimeHealthScope.monitorIntent("main",desired:"paused",reason:"Administrator paused macOS/app monitoring")
         var removed: [String] = []
         if FileManager.default.fileExists(atPath: plistPath) {
             try? FileManager.default.removeItem(atPath: plistPath)

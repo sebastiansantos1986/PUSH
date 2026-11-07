@@ -1,6 +1,17 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: ConfigCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // ConfigCommand.swift — Config inspection and modification
 
 import Foundation
+import CoreFoundation
 
 struct ConfigCommand {
     let args: [String]
@@ -67,6 +78,32 @@ struct ConfigCommand {
         case "ui.hardBlockFullscreen":             return "\(config.ui.hardBlockFullscreen)"
         case "preflight.powerCheckTimeoutMinutes": return "\(config.preflight.powerCheckTimeoutMinutes)"
         case "preflight.minDiskSpaceGB":           return "\(config.preflight.minDiskSpaceGB)"
+        case "entra.enabled": return "\(config.entra.enabled)"
+        case "entra.policyID": return config.entra.policyID
+        case "entra.startHour": return "\(config.entra.startHour)"
+        case "entra.endHour": return "\(config.entra.endHour)"
+        case "entra.weekdaysOnly": return "\(config.entra.weekdaysOnly)"
+        case "entra.skipMeetings": return "\(config.entra.skipMeetings)"
+        case "entra.reconOnRegistration": return "\(config.entra.reconOnRegistration)"
+        case "entra.selfServicePath": return config.entra.selfServicePath
+        case "entra.companyPortalPath": return config.entra.companyPortalPath
+        case "entra.jamfBinaryPath": return config.entra.jamfBinaryPath
+        case "entra.message": return config.entra.message
+        case "apps.enabled": return "\(config.apps.enabled)"
+        case "apps.approved": return config.apps.approved
+        case "apps.graceDays": return "\(config.apps.graceDays)"
+        case "apps.deadline": return config.apps.deadline
+        case "apps.chromeDeadline": return config.apps.chromeDeadline
+        case "apps.firefoxDeadline": return config.apps.firefoxDeadline
+        case "apps.vscodeDeadline": return config.apps.vscodeDeadline
+        case "apps.autoUpdateClosed": return "\(config.apps.autoUpdateClosed)"
+        case "apps.notifyHourly": return "\(config.apps.notifyHourly)"
+        case "apps.installomatorPath": return config.apps.installomatorPath
+        case "auto.trackLatest": return "\(config.auto.trackLatest)"
+        case "auto.useMist": return "\(config.auto.useMist)"
+        case "update.automaticDeadline": return config.update.automaticDeadline
+        case "update.automaticDeadlineTarget": return config.update.automaticDeadlineTarget
+        case "update.effectiveDeadline": return config.effectiveDeadline
         case "auto.enabled":                       return "\(config.auto.enabled)"
         case "auto.minorOnly":                     return "\(config.auto.minorOnly)"
         case "auto.minorDeadlineDays":             return "\(config.auto.minorDeadlineDays)"
@@ -119,20 +156,6 @@ struct ConfigCommand {
         case "toast.installButtonLabel":           return config.toast.installButtonLabel
         case "toast.deferButtonLabel":             return config.toast.deferButtonLabel
         case "update.toastIntervalSeconds":        return "\(config.update.toastIntervalSeconds)"
-        case "uptime.enabled":                     return "\(config.uptime.enabled)"
-        case "uptime.warningThresholdDays":        return "\(config.uptime.warningThresholdDays)"
-        case "uptime.forceThresholdDays":          return "\(config.uptime.forceThresholdDays)"
-        case "uptime.maxDeferrals":                return "\(config.uptime.maxDeferrals)"
-        case "uptime.promptIntervalDays":          return "\(config.uptime.promptIntervalDays)"
-        case "uptime.forceTimerSeconds":           return "\(config.uptime.forceTimerSeconds)"
-        case "uptime.skipDuringMeeting":           return "\(config.uptime.skipDuringMeeting)"
-        case "compliance.wallpaperEnabled":         return "\(config.compliance.wallpaperEnabled)"
-        case "compliance.compliantWallpaper":       return config.compliance.compliantWallpaper
-        case "compliance.nonCompliantWallpaper":    return config.compliance.nonCompliantWallpaper
-        case "compliance.wallpaperBackgroundColor": return config.compliance.wallpaperBackgroundColor
-        case "compliance.wallpaperScale":           return config.compliance.wallpaperScale
-        case "compliance.desktopprPath":            return config.compliance.desktopprPath
-        case "compliance.desktopprPkgPath":         return config.compliance.desktopprPkgPath
         default: return nil
         }
     }
@@ -154,77 +177,73 @@ struct ConfigCommand {
         let key   = args[0]
         let value = args[1]
 
-        // Read file, update the matching line
-        guard var yaml = try? String(contentsOfFile: cfgPath, encoding: .utf8) else {
-            cliError("Cannot read config"); exit(1)
-        }
-
-        // Split into section + field. For "laps.enabled" → section "laps", field "enabled".
-        // For "auto.minorDeadlineDays" → section "auto", field "minorDeadlineDays".
-        // For a single-component key (e.g. "url") section is empty and we'll match
-        // the first occurrence anywhere — caller should always pass section.field.
-        let parts = key.split(separator: ".").map(String.init)
-        guard parts.count >= 2 else {
-            cliError("Key must be of form 'section.field' (e.g. update.deadline). Got: '\(key)'")
-            exit(1)
-        }
-        let section = parts[0]
-        let field   = parts.last!
-
-        // Format value: strings get quotes, booleans/integers don't
-        let formatted: String
-        if value == "true" || value == "false" || Int(value) != nil || Double(value) != nil {
-            formatted = value
-        } else {
-            formatted = "\"\(value)\""
-        }
-
-        // Walk lines and replace ONLY the field inside the matching section.
-        // A section starts at column 0 with `name:` and continues until the next
-        // line at column 0 that ends with `:` (next section header) or EOF.
-        var lines = yaml.components(separatedBy: "\n")
-        var inSection = false
-        var replaced  = false
-        for i in 0..<lines.count {
-            let line = lines[i]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Section header detection: starts at column 0, ends in colon
-            if !line.hasPrefix(" ") && !line.hasPrefix("\t") && trimmed.hasSuffix(":") {
-                let header = String(trimmed.dropLast())
-                inSection = (header == section)
-                continue
-            }
-            // Skip comments and blanks
-            if trimmed.hasPrefix("#") || trimmed.isEmpty { continue }
-
-            if inSection {
-                // Match `<indent>fieldname:<rest>`
-                let pattern = "^(\\s*\(NSRegularExpression.escapedPattern(for: field)):).*$"
-                if let regex = try? NSRegularExpression(pattern: pattern),
-                   regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil {
-                    let range = NSRange(line.startIndex..., in: line)
-                    lines[i] = regex.stringByReplacingMatches(in: line, range: range,
-                                                              withTemplate: "$1 \(formatted)")
-                    replaced = true
-                    break  // only replace the first match in the section
-                }
-            }
-        }
-
-        guard replaced else {
-            cliError("Key '\(key)' not found in config. Add it manually first."); exit(1)
-        }
-
-        yaml = lines.joined(separator: "\n")
         do {
-            try yaml.write(toFile: cfgPath, atomically: true, encoding: .utf8)
-            let loggedValue = isSensitiveConfigKey(key) ? redactedValue(value) : formatted
+            let source = try String(contentsOfFile:cfgPath,encoding:.utf8)
+            let edited = try Self.upsertingConfig(source,key:key,value:value)
+            guard (try String(contentsOfFile:cfgPath,encoding:.utf8)) == source else {
+                throw CLIError.invalidValue("Configuration changed while editing. Retry with the latest file.")
+            }
+            let original = URL(fileURLWithPath:cfgPath)
+            let attributes = try FileManager.default.attributesOfItem(atPath:cfgPath)
+            guard attributes[.type] as? FileAttributeType == .typeRegular else { throw CLIError.invalidValue("Edit the managed configuration source rather than a linked file.") }
+            let backups = original.deletingLastPathComponent().appendingPathComponent("config-backups")
+            if FileManager.default.fileExists(atPath:backups.path) {
+                let info = try FileManager.default.attributesOfItem(atPath:backups.path)
+                guard info[.type] as? FileAttributeType == .typeDirectory, (info[.ownerAccountID] as? NSNumber)?.intValue == 0,
+                      ((info[.posixPermissions] as? NSNumber)?.intValue ?? 0o777) & 0o022 == 0 else { throw CLIError.invalidValue("Configuration backup folder is not protected.") }
+            } else { try FileManager.default.createDirectory(at:backups,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700]) }
+            let backup = backups.appendingPathComponent(original.lastPathComponent + "." + UUID().uuidString + ".bak")
+            guard FileManager.default.createFile(atPath:backup.path,contents:Data(source.utf8),attributes:[.posixPermissions:0o600]) else { throw CLIError.invalidValue("Could not back up the existing configuration.") }
+            let staged = original.deletingLastPathComponent().appendingPathComponent(".push-config-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at:staged) }
+            guard FileManager.default.createFile(atPath:staged.path,contents:Data(edited.utf8),attributes:[.posixPermissions:0o600]) else { throw CLIError.invalidValue("Could not stage the configuration change.") }
+            var retained: [FileAttributeKey:Any] = [:]
+            for key in [FileAttributeKey.posixPermissions,.ownerAccountID,.groupOwnerAccountID] { retained[key] = attributes[key] }
+            try FileManager.default.setAttributes(retained,ofItemAtPath:staged.path)
+            guard (try String(contentsOfFile:cfgPath,encoding:.utf8)) == source else { throw CLIError.invalidValue("Configuration changed; retry the edit.") }
+            guard rename(staged.path,cfgPath) == 0 else { throw CLIError.invalidValue("Could not commit the configuration change.") }
+            let loggedValue = isSensitiveConfigKey(key) ? redactedValue(value) : value
             cliSuccess("Set \(key) = \(loggedValue)")
-            cliLog("[Config] Set \(key) = \(loggedValue)")
-        } catch {
-            cliError("Failed to write config: \(error.localizedDescription)"); exit(1)
+            cliInfo("Previous config backup:",backup.path)
+        } catch { cliError("Configuration was not updated: \(error.localizedDescription)"); exit(1) }
+    }
+
+    /// A missing supported field is an upsert, including in an older installed YAML.
+    static func upsertingConfig(_ source: String, key: String, value: String) throws -> String {
+        let parts = key.split(separator:".",omittingEmptySubsequences:false).map(String.init)
+        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } }) else { throw CLIError.invalidKey(key) }
+        let schema = try JSONSerialization.jsonObject(with:JSONEncoder().encode(CLIConfig())) as! [String:Any]
+        let fields: [String:Any]?
+        if parts[0] == "laps" { fields = (schema["jamf"] as? [String:Any])?["laps"] as? [String:Any] }
+        else { fields = schema[parts[0]] as? [String:Any] }
+        guard let sample = fields?[parts[1]] else { throw CLIError.invalidKey(key) }
+        let encoded: String
+        if sample is String {
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
+            encoded = String(decoding:try encoder.encode(value),as:UTF8.self)
+        } else if let number = sample as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                guard ["true","false"].contains(value) else { throw CLIError.invalidValue("\(key) requires true or false") }
+                encoded = value
+            } else {
+                guard let integer = Int(value) else { throw CLIError.invalidValue("\(key) requires an integer") }
+                encoded = String(integer)
+            }
+        } else { throw CLIError.invalidValue("\(key) is not a scalar setting") }
+        guard !source.trimmingCharacters(in:.whitespacesAndNewlines).hasPrefix("{"), !source.contains("\t") else { throw CLIError.invalidValue("Use PUSH block YAML with spaces before editing this configuration") }
+        var headers = 0
+        for line in source.components(separatedBy:"\n") where !line.hasPrefix(" ") {
+            let text = line.components(separatedBy:"#")[0].trimmingCharacters(in:.whitespaces)
+            if text.hasPrefix(parts[0] + ":") {
+                guard text == parts[0] + ":" else { throw CLIError.invalidValue("\(parts[0]) must be a block YAML section") }
+                headers += 1
+            }
         }
+        guard headers <= 1 else { throw CLIError.invalidValue("Merge duplicate \(parts[0]) sections before editing") }
+        let result = updatingYAMLScalar(source,section:[parts[0]],field:parts[1],encoded:encoded)
+        let parsed = CLIConfig.parse(yaml:result)
+        if parts[0] == "entra", !EntraNudgeCommand.valid(parsed.entra) { throw CLIError.invalidValue("Invalid Entra policy settings") }
+        return result
     }
 
     // MARK: - Validate
@@ -237,8 +256,22 @@ struct ConfigCommand {
 
         var issues: [String] = []
 
-        if config.update.targetVersion.isEmpty {
+        if !EntraNudgeCommand.valid(config.entra) { issues.append("Invalid Entra registration policy ID, app paths, message, or working hours") }
+        let approved = AppUpdatePolicy.ids(config.apps.approved)
+        if !approved.allSatisfy({ id in ApprovedApp.catalog.contains { $0.id == id } }) || (config.apps.enabled && approved.isEmpty) { issues.append("apps.approved must contain supported, explicitly approved app IDs") }
+        for id in approved {
+            let deadline = config.apps.deadlineOverride(for:id)
+            if !deadline.isEmpty && ISO8601DateFormatter().date(from:deadline) == nil { issues.append("Invalid app deadline for " + id) }
+        }
+        if !(1...365).contains(config.apps.graceDays) { issues.append("apps.graceDays must be between 1 and 365") }
+        if config.update.targetVersion.isEmpty && !config.auto.trackLatest {
             issues.append("update.targetVersion is not set — run: sudo push-cli auto-check")
+        }
+        if !config.update.deadline.isEmpty && ISO8601DateFormatter().date(from: config.update.deadline) == nil {
+            issues.append("update.deadline must be an ISO 8601 timestamp with time zone")
+        }
+        if !(1...365).contains(config.auto.minorDeadlineDays) || !(1...365).contains(config.auto.majorDeadlineDays) {
+            issues.append("Automatic deadline days must be between 1 and 365")
         }
         if !config.update.targetVersion.isEmpty && !isValidVersion(config.update.targetVersion) {
             issues.append("update.targetVersion '\(config.update.targetVersion)' is not a valid version")

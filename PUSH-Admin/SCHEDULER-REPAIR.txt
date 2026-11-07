@@ -1,0 +1,55 @@
+PUSH Scheduler Repair — engine 1.2.4 / Admin 0.1.5
+Developer: Sebastian Santos
+
+Quit PUSH Admin (Command-Q), then open PUSH-Scheduler-Repair-0.1.5.pkg.
+The package backs up the prior engine, preserves configuration/state/Keychain entries,
+and leaves the automatic daemon paused. It does not launch an app or start an upgrade.
+This local test package is unsigned; fleet signing/notarization is not included.
+Your Desktop Xcode project has not been overwritten.
+
+Verify and test yourself:
+/Library/Management/PUSH/push-cli --version
+sudo /Library/Management/PUSH/push-cli popup softNudge
+
+Expect push-cli v1.2.4.
+Click Schedule…: the existing reminder date picker should open.
+Cancel returns to the original popup without returning a scheduling result.
+Reopen Schedule…, choose a future time, and confirm Schedule.
+Expect “User scheduled a reminder for <date>”, never “Toast auto-dismissed”.
+A manual popup command tests responses; it does not start an install or change the saved schedule.
+When the configured deadline has passed, manual previews clearly use a sample deadline
+7 days ahead. The YAML deadline remains unchanged. The production picker retains the
+real deadline and explains when scheduling is unavailable.
+
+PUSH Admin is installed at /Applications/PUSH Admin.app.
+Popup Studio uses the same scheduler date rules and simulates button responses.
+Its button panel records observed actions; it is not a claim that every GUI interaction
+has been tested automatically. Labels, foreground content, and the default solid
+appearance remain readable; optional frosted backgrounds honor Reduce Transparency.
+
+Additional manual response checks (each safe popup test):
+sudo /Library/Management/PUSH/push-cli popup toast
+  Later -> User chose Later; close -> User dismissed; Install -> User chose Install.
+  The manual command does not start an upgrade even when Install is selected.
+sudo /Library/Management/PUSH/push-cli popup compliant
+  Done -> User dismissed.
+sudo /Library/Management/PUSH/push-cli popup error --error "PUSH test — no installation is running."
+  Dismiss -> User dismissed.
+
+Cause confirmed from the November 5 crash reports:
+DatePickerSheet constructed an inverted date range when the configured deadline was
+in the past. Swift terminated the popup with SIGTRAP (signal 5). The response mapper
+mistakenly interpreted 5 as a toast timeout even for a non-toast popup.
+
+Repair:
+- Date ranges remain valid for expired, current, future, and missing deadlines.
+- Schedule opens its modal; the popup behind it cannot accept Install while it is open.
+- Confirmation requires a valid reminder, and saving failures keep the popup open.
+- Signals are separated from normal button exits; toast timeout text is state-specific.
+- Manual test previews never change the production deadline.
+
+Validation completed: engine and companion build for Apple Silicon and Intel;
+64 isolated scheduler/response regression assertions passed; packaged versions,
+signatures, payloads, and installer scripts were inspected without installing them.
+The PUSH apps and popups were not launched by Codex. Visual button testing remains
+for you to perform on your Mac.

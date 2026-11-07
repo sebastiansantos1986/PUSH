@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: CLIConfig.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // CLIConfig.swift — Config model and YAML parser for push-cli
 
 import Foundation
@@ -5,6 +15,8 @@ import Foundation
 // MARK: - Root config
 
 struct CLIConfig: Codable {
+    var entra: CLIEntraConfig = .init()
+    var apps: CLIAppsConfig = .init()
     var update:    CLIUpdateConfig    = .init()
     var ui:        CLIUIConfig        = .init()
     var toast:     CLIToastConfig     = .init()
@@ -12,19 +24,51 @@ struct CLIConfig: Codable {
     var auto:      CLIAutoConfig      = .init()
     var schedule:  CLIScheduleConfig  = .init()
     var ddm:       CLIDDMConfig       = .init()
-    var jamf:       CLIJamfConfig       = .init()
-    var auth:       CLIAuthConfig       = .init()
-    var uptime:     CLIUptimeConfig     = .init()
-    var compliance: CLIComplianceConfig = .init()
-    var debug:      CLIDebugConfig      = .init()
-    var logging:    CLILoggingConfig    = .init()
+    var jamf:      CLIJamfConfig      = .init()
+    var auth:      CLIAuthConfig      = .init()
+    var uptime:    CLIUptimeConfig    = .init()
+    var debug:     CLIDebugConfig     = .init()
+    var logging:   CLILoggingConfig   = .init()
+}
+
+struct CLIEntraConfig: Codable, Equatable {
+    var enabled = false
+    var policyID = "876"
+    var startHour = 8
+    var endHour = 18
+    var weekdaysOnly = true
+    var skipMeetings = true
+    var reconOnRegistration = true
+    var selfServicePath = "/Applications/Self Service.app"
+    var companyPortalPath = "/Applications/Company Portal.app"
+    var jamfBinaryPath = "/usr/local/bin/jamf"
+    var message = ""
+}
+
+struct CLIAppsConfig: Codable {
+    var enabled = false
+    var approved = ""
+    var graceDays = 7
+    var deadline = ""
+    var chromeDeadline = ""
+    var firefoxDeadline = ""
+    var vscodeDeadline = ""
+    var autoUpdateClosed = false
+    var notifyHourly = true
+    var installomatorPath = "/usr/local/Installomator/Installomator.sh"
+    func deadlineOverride(for id: String) -> String {
+        let perApp = id == "chrome" ? chromeDeadline : (id == "firefox" ? firefoxDeadline : vscodeDeadline)
+        return perApp.isEmpty ? deadline : perApp
+    }
 }
 
 struct CLIUpdateConfig: Codable {
     var targetVersion:               String = ""
     var macOSName:                   String = "macOS"
     var releaseType:                 String = "minor"
-    var deadline:                    String = ""
+    var deadline:                    String = ""  // Explicit admin override, never replaced by discovery
+    var automaticDeadline:           String = ""
+    var automaticDeadlineTarget:     String = ""
     var maxDeferrals:                Int    = 5
     var nudgeIntervalSeconds:        Int    = 3600
     var toastIntervalSeconds:        Int    = 3600   // how often toast appears (default 1 hour)
@@ -42,6 +86,8 @@ struct CLIUIConfig: Codable {
     var logoPath:                String = ""
     var sfSymbolName:            String = ""
     var popupWidth:              Int    = 540
+    var popupBackgroundStyle:    String = "solid"
+    var popupOpacityPercent:     Int    = 85
     var itContactEmail:          String = ""
     var itContactPhone:          String = ""
     var helpURL:                 String = ""
@@ -81,6 +127,8 @@ struct CLIPreflightConfig: Codable {
 }
 
 struct CLIAutoConfig: Codable {
+    var trackLatest: Bool = false // Opt-in: keep discovering after the saved target is met
+    var useMist: Bool = true
     var enabled:              Bool   = true
     var minorOnly:            Bool   = false
     var skipBetas:            Bool   = true
@@ -154,31 +202,6 @@ struct CLIUptimeConfig: Codable {
     var skipIfOSUpdateImminentDays: Int = 3
 }
 
-/// Compliance signaling — sets the desktop wallpaper based on OS update
-/// compliance state, so users get a passive visual cue without an extra popup.
-/// Compliant Mac → "compliant" wallpaper. Non-compliant Mac → "non-compliant"
-/// wallpaper. Wallpaper changes only fire on state TRANSITIONS, not every
-/// auto-check, so the user keeps any custom wallpaper between transitions.
-///
-/// Requires desktoppr — bundled at desktopprPkgPath, lazy-installed on first
-/// wallpaper apply.
-struct CLIComplianceConfig: Codable {
-    /// Master switch. Default false so existing deployments don't surprise users.
-    /// Flip to true once wallpapers are in place and you want visual signaling.
-    var wallpaperEnabled:        Bool   = false
-    var compliantWallpaper:      String = "/Library/Management/PUSH/Compliance-Background/compliant.jpg"
-    var nonCompliantWallpaper:   String = "/Library/Management/PUSH/Compliance-Background/non-compliant.jpg"
-    /// Hex color (no #) used as the desktop background when the image doesn't
-    /// fully cover the screen (letterboxing).
-    var wallpaperBackgroundColor: String = "020C19"
-    /// desktoppr scale mode: fit | fill | stretch | center | tile
-    var wallpaperScale:          String = "fit"
-    /// Where desktoppr is installed (or expected to be).
-    var desktopprPath:           String = "/usr/local/bin/desktoppr"
-    /// Bundled installer for lazy-install if desktoppr is missing.
-    var desktopprPkgPath:        String = "/Library/Management/PUSH/Compliance-Background/desktoppr.pkg"
-}
-
 struct CLIJamfLapsConfig: Codable {
     var enabled:       Bool   = false
     var accountName:   String = ""       // e.g. "CasperLocalAdmin"
@@ -231,6 +254,13 @@ struct CLIDeferralState: Codable {
     var lastSeenVersion:    String = ""
     var installStarted:     Bool   = false
     var installCompleted:   Bool   = false
+    var installStartedAt: Date? = nil
+    var installOwnerPID: Int32? = nil
+    var lastDiscoveryDate: Date? = nil
+    var lastDiscoveryError: String? = nil
+    var lastRecoveryMessage: String? = nil
+    var installTargetVersion: String? = nil
+    var installBootTimestamp: Double? = nil
     var deadlineNotifiedAt: Date?  = nil
     var gracePeriodUntil:   Date?  = nil   // IT-granted extension
     var deferralReasons:    [String] = []  // reasons user gave when deferring
@@ -241,11 +271,6 @@ struct CLIDeferralState: Codable {
     var uptimeDeferralCount:     Int    = 0
     var uptimeNextPromptDate:    Date   = .distantPast
     var uptimeLastBootTimestamp: Double = 0       // sysctl kern.boottime sec
-
-    /// Compliance wallpaper transition tracking. Set to "compliant" or
-    /// "non-compliant" after wallpaper applied. Empty string = not yet set.
-    /// Used to avoid re-applying the same wallpaper on every auto-check.
-    var lastAppliedWallpaperState: String = ""
 }
 
 // MARK: - Load
@@ -283,11 +308,38 @@ extension CLIConfig {
 
         let root = parseYAMLDict(source)
 
+        if let e = root["entra"] as? [String:Any] {
+            c.entra.enabled = boo(e,"enabled",false)
+            c.entra.policyID = str(e,"policyID","876")
+            c.entra.startHour = int(e,"startHour",8)
+            c.entra.endHour = int(e,"endHour",18)
+            c.entra.weekdaysOnly = boo(e,"weekdaysOnly",true)
+            c.entra.skipMeetings = boo(e,"skipMeetings",true)
+            c.entra.reconOnRegistration = boo(e,"reconOnRegistration",true)
+            c.entra.selfServicePath = str(e,"selfServicePath",c.entra.selfServicePath)
+            c.entra.companyPortalPath = str(e,"companyPortalPath",c.entra.companyPortalPath)
+            c.entra.jamfBinaryPath = str(e,"jamfBinaryPath",c.entra.jamfBinaryPath)
+            c.entra.message = str(e,"message")
+        }
+        if let a = root["apps"] as? [String:Any] {
+            c.apps.enabled = boo(a,"enabled",false)
+            c.apps.approved = str(a,"approved")
+            c.apps.graceDays = int(a,"graceDays",7)
+            c.apps.deadline = str(a,"deadline")
+            c.apps.chromeDeadline = str(a,"chromeDeadline")
+            c.apps.firefoxDeadline = str(a,"firefoxDeadline")
+            c.apps.vscodeDeadline = str(a,"vscodeDeadline")
+            c.apps.autoUpdateClosed = boo(a,"autoUpdateClosed",false)
+            c.apps.notifyHourly = boo(a,"notifyHourly",true)
+            c.apps.installomatorPath = str(a,"installomatorPath",c.apps.installomatorPath)
+        }
         if let u = root["update"] as? [String: Any] {
             c.update.targetVersion                = str(u, "targetVersion")
             c.update.macOSName                    = str(u, "macOSName", "macOS")
             c.update.releaseType                  = str(u, "releaseType", "minor")
             c.update.deadline                     = str(u, "deadline")
+            c.update.automaticDeadline            = str(u, "automaticDeadline")
+            c.update.automaticDeadlineTarget      = str(u, "automaticDeadlineTarget")
             c.update.maxDeferrals                 = int(u, "maxDeferrals", 5)
             c.update.nudgeIntervalSeconds         = int(u, "nudgeIntervalSeconds", 3600)
             c.update.toastIntervalSeconds         = int(u, "toastIntervalSeconds", 3600)
@@ -304,6 +356,8 @@ extension CLIConfig {
             c.ui.accentColorHex           = str(u, "accentColorHex", "#0A84FF")
             c.ui.logoPath                 = str(u, "logoPath",  "")
             c.ui.sfSymbolName             = str(u, "sfSymbolName", "")
+            c.ui.popupBackgroundStyle = str(u, "popupBackgroundStyle", "solid")
+            c.ui.popupOpacityPercent = min(100, max(55, int(u, "popupOpacityPercent", 85)))
             c.ui.popupWidth               = int(u, "popupWidth", 500)
             c.ui.itContactEmail           = str(u, "itContactEmail", "")
             c.ui.itContactPhone           = str(u, "itContactPhone", "")
@@ -344,6 +398,8 @@ extension CLIConfig {
         }
 
         if let a = root["auto"] as? [String: Any] {
+            c.auto.trackLatest          = boo(a, "trackLatest", false)
+            c.auto.useMist              = boo(a, "useMist", true)
             c.auto.enabled              = boo(a, "enabled",   true)
             c.auto.minorOnly            = boo(a, "minorOnly", false)
             c.auto.skipBetas            = boo(a, "skipBetas", true)
@@ -382,16 +438,6 @@ extension CLIConfig {
             c.uptime.forceTimerSeconds          = int(u, "forceTimerSeconds",          600)
             c.uptime.skipDuringMeeting          = boo(u, "skipDuringMeeting",          true)
             c.uptime.skipIfOSUpdateImminentDays = int(u, "skipIfOSUpdateImminentDays", 3)
-        }
-
-        if let cm = root["compliance"] as? [String: Any] {
-            c.compliance.wallpaperEnabled         = boo(cm, "wallpaperEnabled",         false)
-            c.compliance.compliantWallpaper       = str(cm, "compliantWallpaper",       c.compliance.compliantWallpaper)
-            c.compliance.nonCompliantWallpaper    = str(cm, "nonCompliantWallpaper",    c.compliance.nonCompliantWallpaper)
-            c.compliance.wallpaperBackgroundColor = str(cm, "wallpaperBackgroundColor", "020C19")
-            c.compliance.wallpaperScale           = str(cm, "wallpaperScale",           "fit")
-            c.compliance.desktopprPath            = str(cm, "desktopprPath",            "/usr/local/bin/desktoppr")
-            c.compliance.desktopprPkgPath         = str(cm, "desktopprPkgPath",         c.compliance.desktopprPkgPath)
         }
 
         if let j = root["jamf"] as? [String: Any] {
@@ -490,13 +536,18 @@ extension CLIConfig {
 
     var isMajor: Bool { update.releaseType == "major" }
 
+    var effectiveDeadline: String {
+        if !update.deadline.isEmpty { return update.deadline }
+        return update.automaticDeadlineTarget == update.targetVersion ? update.automaticDeadline : ""
+    }
+
     var isPastDeadline: Bool {
-        guard !update.deadline.isEmpty else { return false }
+        guard !effectiveDeadline.isEmpty else { return false }
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate,
                              .withColonSeparatorInTime]
-        guard let d = fmt.date(from: update.deadline)
-               ?? ISO8601DateFormatter().date(from: update.deadline)
+        guard let d = fmt.date(from: effectiveDeadline)
+               ?? ISO8601DateFormatter().date(from: effectiveDeadline)
         else { return false }
         return Date() > d
     }

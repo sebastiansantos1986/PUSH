@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: DashboardCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // DashboardCommand.swift — Generate a self-contained HTML compliance dashboard
 //
 // Usage:
@@ -41,7 +51,7 @@ struct DashboardCommand {
             deferralsUsed: deferralsUsed, deferralsMax: deferralsMax,
             deferralPct: deferralPct,
             daysUntilDeadline: daysUntilDeadline,
-            deadline: config.update.deadline,
+            deadline: config.effectiveDeadline,
             releaseType: config.update.releaseType,
             pastDeadline: config.isPastDeadline,
             installStarted: state.installStarted,
@@ -197,11 +207,11 @@ h1{font-size:22px;font-weight:600;color:#fff;margin-bottom:4px}
 
 extension CLIConfig {
     var deadlineDate: Date? {
-        guard !update.deadline.isEmpty else { return nil }
+        guard !effectiveDeadline.isEmpty else { return nil }
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate,
                              .withColonSeparatorInTime]
-        return fmt.date(from: update.deadline)
-            ?? ISO8601DateFormatter().date(from: update.deadline)
+        return fmt.date(from: effectiveDeadline)
+            ?? ISO8601DateFormatter().date(from: effectiveDeadline)
     }
 }

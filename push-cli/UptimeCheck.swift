@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: UptimeCheck.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // UptimeCheck.swift — Reboot reminder and enforcement based on Mac uptime.
 //
 // Long uptimes accumulate kernel issues, leaked memory, broken Bluetooth/Wi-Fi
@@ -74,7 +84,7 @@ struct UptimeCheck {
         // would be wasted noise.
         if !config.update.targetVersion.isEmpty {
             let current = currentMacOSVersion()
-            if current != config.update.targetVersion {
+            if !versionGTE(current, config.update.targetVersion) {
                 cliLog("[Uptime] OS update pending (\(current) → \(config.update.targetVersion)) — skipping uptime prompt")
                 return .quiet
             }

@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: CLIHelpers.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // CLIHelpers.swift — Shared utilities for push-cli
 
 import Foundation
@@ -6,18 +16,22 @@ import Foundation
 // All output is mirrored to the log file so every run is fully auditable.
 
 func cliPrint(_ msg: String) {
+    RuntimeHealthScope.note(msg)
     print(msg)
     writeToLog(msg)
 }
 func cliSuccess(_ msg: String) {
+    RuntimeHealthScope.note(msg)
     print("\u{001B}[32m✓\u{001B}[0m \(msg)")
     writeToLog("✓ \(msg)")
 }
 func cliWarning(_ msg: String) {
+    RuntimeHealthScope.note(msg)
     print("\u{001B}[33m⚠\u{001B}[0m \(msg)")
     writeToLog("⚠ \(msg)")
 }
 func cliError(_ msg: String) {
+    RuntimeHealthScope.note(msg,error:true)
     fputs("\u{001B}[31m✗\u{001B}[0m \(msg)\n", stderr)
     writeToLog("✗ \(msg)")
 }
@@ -99,6 +113,12 @@ func loadConfig() throws -> CLIConfig {
     return try CLIConfig.load(from: path)
 }
 
+/// Action paths must not turn unreadable state into an empty, apparently idle state.
+func loadStateForAction(from path: String = statePath) throws -> CLIDeferralState {
+    guard FileManager.default.fileExists(atPath: path) else { return CLIDeferralState() }
+    return try JSONDecoder().decode(CLIDeferralState.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+}
+
 func loadState() -> CLIDeferralState {
     guard let data  = FileManager.default.contents(atPath: statePath),
           let state = try? JSONDecoder().decode(CLIDeferralState.self, from: data)
@@ -117,18 +137,8 @@ func saveState(_ state: CLIDeferralState) throws {
 
 @discardableResult
 func shell(_ cmd: String) -> (output: String, status: Int32) {
-    let p    = Process()
-    let pipe = Pipe()
-    p.launchPath          = "/bin/zsh"
-    p.arguments           = ["-c", cmd]
-    p.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
-    p.standardOutput      = pipe
-    p.standardError       = pipe
-    try? p.run()
-    p.waitUntilExit()
-    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
-                     encoding: .utf8) ?? ""
-    return (out.trimmingCharacters(in: .whitespacesAndNewlines), p.terminationStatus)
+    let (out, status) = runDirect("/bin/zsh", ["-c", cmd])
+    return (out.trimmingCharacters(in: .whitespacesAndNewlines), status)
 }
 
 // MARK: - Logging
@@ -243,32 +253,21 @@ func consoleUserHasSecureToken() -> Bool {
 ///                       allowBootstrapToken: true from those paths.
 ///   .keychain        — Password stored in System Keychain
 ///   .config          — Password in config.yaml (plain text fallback)
-///   .prompt          — Must prompt the user
+///   .unavailable     — Leave the installation for IT; never prompt the user
 enum AuthMethod: String {
     case bootstrapToken    = "Bootstrap Token (MDM)"
-    case userSavedPassword = "User Saved Password"
     case laps              = "Jamf LAPS"
     case keychain          = "System Keychain"
     case config            = "Config file"
-    case prompt            = "User prompt"
+    case unavailable       = "IT authorization needed (no user prompts)"
 }
 
 func selectAuthMethod(config: CLIConfig, allowBootstrapToken: Bool = false) -> AuthMethod {
-    guard isAppleSilicon() else { return .prompt } // Intel doesn't need auth
+    guard isAppleSilicon() else { return .unavailable } // Intel install paths do not request credentials
 
     // Bootstrap Token only when caller opts in (MDM-driven installs only).
     if allowBootstrapToken && isBootstrapTokenEscrowed() {
         return .bootstrapToken
-    }
-    // System Keychain is preferred for production because the root daemon can
-    // read it without prompting the user on every LaunchDaemon run.
-    if let pwd = keychainPassword(), !pwd.isEmpty {
-        return .keychain
-    }
-    // Legacy user-saved login password fallback for older installs.
-    if let consoleUser = consoleUser()?.name,
-       userPasswordExistsInLoginKeychain(account: consoleUser) {
-        return .userSavedPassword
     }
     // LAPS: zero-touch retrieval from Jamf at install time.
     if config.jamf.laps.enabled
@@ -279,10 +278,13 @@ func selectAuthMethod(config: CLIConfig, allowBootstrapToken: Bool = false) -> A
     {
         return .laps
     }
-    if !config.auth.localPassword.isEmpty {
+    if !config.auth.localAccount.isEmpty && keychainPasswordExists() {
+        return .keychain
+    }
+    if !config.auth.localAccount.isEmpty && !config.auth.localPassword.isEmpty {
         return .config
     }
-    return .prompt
+    return .unavailable
 }
 
 // MARK: - Console user (for GUI session launching)
@@ -298,7 +300,7 @@ func consoleUser() -> (name: String, uid: Int)? {
 /// Launch push-ui non-blocking in the console user's GUI session (for toasts/installing).
 func launchUIAsUser(_ cmd: String) {
     guard let user = consoleUser() else {
-        shell("nohup \(cmd) > /tmp/push-ui.log 2>&1 &")
+        shell("nohup \(cmd) > /dev/null 2>&1 &")
         return
     }
     cliLog("[UI] Launching as \(user.name) (uid \(user.uid)): \(cmd)")
@@ -320,55 +322,84 @@ func launchUIAsUser(_ cmd: String) {
 
     if !appBundle.isEmpty && appBundle.hasSuffix(".app") {
         // Launch via open -a so macOS properly connects it to the user's session
-        let openCmd = "launchctl asuser \(user.uid) /usr/bin/open -a \"\(appBundle)\" --args \(openArgs) > /tmp/push-ui.log 2>&1 &"
+        let openCmd = "launchctl asuser \(user.uid) /usr/bin/open -a \"\(appBundle)\" --args \(openArgs) > /dev/null 2>&1 &"
         cliLog("[UI] open command: \(openCmd)")
         shell(openCmd)
     } else {
         // Fallback to direct launch
-        shell("launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \(cmd) > /tmp/push-ui.log 2>&1 &")
+        shell("launchctl asuser \(user.uid) sudo -u \"\(user.name)\" \(cmd) > /dev/null 2>&1 &")
     }
 }
 
 /// Launch push-ui BLOCKING in the console user's GUI session.
 /// Returns the exit code. Times out after timeoutMinutes (default 15).
 func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15) -> Int32 {
-    guard let user = consoleUser() else {
-        let (_, s) = shell(cmd); return s
-    }
-
-    let pid      = ProcessInfo.processInfo.processIdentifier
-    let exitFile = "/tmp/push-ui-exit.\(pid)"
-    let wrapper  = "/tmp/push-ui-run.\(pid).sh"
-
-    let script = """
-    #!/bin/bash
-    \(cmd)
-    echo $? > "\(exitFile)"
-    """
+    guard let user = consoleUser() else { return RuntimeHealthScope.uiResult(101) }
+    let fm = FileManager.default
+    let session = URL(fileURLWithPath:"/private/tmp/push-ui-session-" + UUID().uuidString)
+    let ready = session.appendingPathComponent("ready")
+    let log = session.appendingPathComponent("output")
     do {
-        try script.write(toFile: wrapper, atomically: true, encoding: .utf8)
-    } catch {
-        cliLog("[UI] Cannot write wrapper: \(error)")
-        let (_, s) = shell(cmd); return s
-    }
-    shell("chmod +x \"\(wrapper)\"")
-    shell("launchctl asuser \(user.uid) sudo -u \"\(user.name)\" /bin/bash \"\(wrapper)\" &")
-
-    let timeout = Date().addingTimeInterval(TimeInterval(timeoutMinutes * 60))
-    while !FileManager.default.fileExists(atPath: exitFile) {
-        guard Date() < timeout else {
-            cliLog("[UI] runUIBlocking timed out after \(timeoutMinutes) minutes")
-            break
+        try fm.createDirectory(at:session,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        if getuid() == 0 { try fm.setAttributes([.ownerAccountID:NSNumber(value:user.uid)],ofItemAtPath:session.path) }
+        else if getuid() != user.uid { try? fm.removeItem(at:session); return RuntimeHealthScope.uiResult(101) }
+    } catch { return RuntimeHealthScope.uiResult(99) }
+    defer { try? fm.removeItem(at:session) }
+    guard fm.createFile(atPath:log.path,contents:nil,attributes:[.posixPermissions:0o600]),
+          let output = try? FileHandle(forUpdating:log) else { return RuntimeHealthScope.uiResult(99) }
+    defer { try? output.close() }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath:"/bin/launchctl")
+    let command = cmd + " --ready-file " + shellArgument(ready.path)
+    process.arguments = ["asuser",String(user.uid),"/usr/bin/sudo","-n","-u",user.name,"--","/bin/zsh","-c","exec " + command]
+    process.standardOutput = output; process.standardError = output
+    process.standardInput = FileHandle.nullDevice
+    do { try process.run() } catch { cliLog("[UI] Could not start GUI session process: \(error.localizedDescription)"); return RuntimeHealthScope.uiResult(99) }
+    func diagnostic() {
+        // Read the original descriptor, not a user-replaceable pathname.
+        guard let size = try? output.seekToEnd() else { return }
+        try? output.seek(toOffset:size > 1200 ? size - 1200 : 0)
+        if let data = try? output.read(upToCount:1200), !data.isEmpty {
+            let safe = String(decoding:data,as:UTF8.self).unicodeScalars.filter { $0.value >= 32 && $0.value != 127 || $0 == "\n" }
+            cliLog("[UI] Diagnostic: " + String(String.UnicodeScalarView(safe)))
         }
-        Thread.sleep(forTimeInterval: 0.5)
     }
-
-    let exitStr  = (try? String(contentsOfFile: exitFile, encoding: .utf8))?
-        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "2"
-    let exitCode = Int32(exitStr) ?? 2
-    shell("rm -f \"\(wrapper)\" \"\(exitFile)\" 2>/dev/null")
-    cliLog("[UI] Exit code: \(exitCode)")
-    return exitCode
+    func stop() {
+        guard process.isRunning else { return }
+        process.terminate()
+        let end = Date().addingTimeInterval(1)
+        while process.isRunning && Date() < end { Thread.sleep(forTimeInterval:0.05) }
+        if process.isRunning { kill(process.processIdentifier,SIGKILL) }
+        process.waitUntilExit()
+    }
+    RuntimeHealthScope.phase("openingPrompt","Opening a PUSH prompt")
+    let startup = Date().addingTimeInterval(20)
+    let timeout = Date().addingTimeInterval(TimeInterval(timeoutMinutes * 60))
+    var visible = false
+    while process.isRunning {
+        if !visible && fm.fileExists(atPath:ready.path) {
+            visible = true
+            RuntimeHealthScope.phase("waitingForUser","Waiting for a response to the visible PUSH prompt")
+            cliLog("[UI] Window reported visible in the console session")
+        }
+        if !visible && Date() >= startup {
+            stop(); diagnostic()
+            cliLog("[UI] Window did not report visible within 20 seconds")
+            return RuntimeHealthScope.uiResult(103)
+        }
+        if Date() >= timeout { stop(); diagnostic(); cliLog("[UI] No user response before timeout"); return RuntimeHealthScope.uiResult(100) }
+        Thread.sleep(forTimeInterval:0.1)
+    }
+    process.waitUntilExit()
+    let reportedVisible = visible || fm.fileExists(atPath:ready.path)
+    let result = popupWindowResult(status:process.terminationStatus,reason:process.terminationReason,visible:reportedVisible)
+    guard reportedVisible else {
+        diagnostic()
+        cliLog("[UI] Child exited before reporting a visible window (status \(result))")
+        return RuntimeHealthScope.uiResult(103)
+    }
+    if result != 0 { diagnostic() }
+    return RuntimeHealthScope.uiResult(result)
 }
 
 // MARK: - push-ui path resolver

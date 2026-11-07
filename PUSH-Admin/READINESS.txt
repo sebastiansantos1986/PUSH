@@ -1,0 +1,61 @@
+PUSH Readiness & Next Action — engine 1.6.0 / PUSH Admin 0.5.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+1. Quit PUSH Admin and let any active PUSH command finish.
+2. Install PUSH-Readiness-0.5.0.pkg using Installer.
+3. Open /Applications/PUSH Admin.app and choose Readiness (the new default page).
+4. Click Refresh. This reads local files and launchd service status only.
+
+What to expect
+- Both schedules should say Paused following this local-test installation.
+- macOS: installed target, effective deadline, earliest toast eligibility, saved
+  installation/reboot state and suggested next action.
+- Apps: approved list, saved pending count, provider presence and saved blockers.
+  File presence does not certify Installomator trust; the engine verifies it.
+- Entra: current-user saved local registration result; cloud compliance remains
+  Not assessed. This unenrolled Mac should retain its Not applicable result
+  after the prior production check. No enrolled-Mac behavior is simulated as fact.
+- An empty saved result says Not checked; Refresh never performs detection.
+- Copy check command only copies text. Review and run it yourself if desired.
+- Working-hour eligibility is not a guaranteed delivery time. The monitor still
+  checks meetings, session availability and active installation/prompt state.
+
+Important monitoring distinction
+A plist or a due date alone does not prove a monitor is running. Readiness queries
+only the two known system services and reports Missing, Paused, Installed but not
+loaded, Unknown, Loaded but not yet verified, Running or Overdue as appropriate.
+A failed/unfinished scheduled check gets its own reason. Manual check history
+never substitutes for a scheduled heartbeat. New history is written by engine
+1.6.0 after you explicitly run checks or enable monitoring. Older saved results
+are retained, but cannot prove current conditions.
+
+No automatic activation
+Installing does not launch PUSH/Admin, bootstrap either daemon, query vendors,
+contact Jamf, perform registration, update apps, download macOS or reboot.
+The preinstall step pauses existing monitors and backs up the previous CLI/UI,
+configuration, state, health records and monitor definitions under
+/Library/Management/PUSH-backups. Existing config/state and Keychain credentials
+are preserved; root-owned pause-intent records explain the test-package pause.
+The original Desktop Xcode project is not modified.
+
+Enable monitoring only after reviewing your installed live policy in Deployment.
+Your preserved policy can include automatic installation after the deadline or
+closed-app updates. Enabling monitoring activates that policy. The dashboard
+itself offers navigation and command copying, not automatic fixes.
+
+Optional version verification (run yourself)
+/Library/Management/PUSH/push-cli --version
+Expected: push-cli v1.6.0
+
+Existing behavior retained
+No end-user password prompt fallback. Credential checks stay noninteractive.
+Explicit YAML deadlines override generated deadlines. Existing previews, popup
+button mapping, app approvals, opt-in registration and registration caps remain.
+PUSH Admin still lists the Mist catalog at startup as before; Readiness Refresh
+is independent and never refreshes that catalog.
+
+This is an unsigned local test package, with ad-hoc signed universal binaries
+for Apple Silicon and Intel, macOS 14+. It is not a notarized fleet release.
+Offline tests/build verification do not establish visual behavior or real-world
+update/registration success. Launch and check the dashboard yourself.

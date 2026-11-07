@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: SharedComponents.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // SharedComponents.swift — Shared UI components for PUSH
 // Clean, solid card design — opaque background, high contrast text.
 
@@ -21,6 +31,7 @@ struct TrafficLights: View {
             || ctx.state == .preflightDisk
             || ctx.state == .preflightPower
             || ctx.state == .rebooting
+            || ctx.state == .rebootForce
     }
 
     var body: some View {
@@ -29,13 +40,12 @@ struct TrafficLights: View {
                 // Only show close button when NOT in a forced install
                 trafficButton(color: Color(red: 1.0, green: 0.37, blue: 0.34),
                               hoverIcon: "xmark",
-                              action: { Foundation.exit(PushExitCode.dismiss.rawValue) })
+                              action: { ctx.exit(.dismiss) })
             } else {
                 // Greyed out — visually present but does nothing
                 Circle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(width: 12, height: 12)
-                    .onTapGesture { recordTamperAttempt("disabled close button clicked") }
             }
             // Minimize always disabled during forced install
             if !isForced {
@@ -46,7 +56,6 @@ struct TrafficLights: View {
                 Circle()
                     .fill(Color.gray.opacity(0.3))
                     .frame(width: 12, height: 12)
-                    .onTapGesture { recordTamperAttempt("disabled minimize button clicked") }
             }
         }
         .onHover { hovering = $0 }
@@ -91,6 +100,35 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Accessible popup surface
+private final class PopupGlassBacking: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+private struct PopupGlassMaterial: NSViewRepresentable {
+    let preview: Bool
+    func makeNSView(context: Context) -> NSVisualEffectView { PopupGlassBacking() }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = .popover
+        view.blendingMode = preview ? .withinWindow : .behindWindow
+        view.state = .active
+    }
+}
+struct PopupSurface: View {
+    @EnvironmentObject private var ctx: UIContext
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        Group {
+            if ctx.config.ui.popupBackgroundStyle == "frosted" && !reduceTransparency {
+                ZStack {
+                    PopupGlassMaterial(preview: ctx.isPreview).allowsHitTesting(false)
+                    Color(NSColor.windowBackgroundColor)
+                        .opacity(popupBackgroundOpacity(ctx.config.ui.popupOpacityPercent))
+                }
+            } else { Color(NSColor.windowBackgroundColor) }
+        }.allowsHitTesting(false)
+    }
+}
+
 // MARK: - Solid PopupCard (opaque, no glass effect)
 
 struct PopupCard<Content: View>: View {
@@ -109,10 +147,7 @@ struct PopupCard<Content: View>: View {
     var body: some View {
         VStack(spacing: 0) { content }
             .frame(width: width)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(NSColor.windowBackgroundColor))
-            )
+            .background(PopupSurface())
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
@@ -136,12 +171,13 @@ struct PopupHeader: View {
     let config:   UIConfig
     let subtitle: String
     var urgent:   Bool = false
+    var title: String? = nil
 
     var body: some View {
         HStack(spacing: 13) {
             AppIconView(config: config, size: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(config.ui.appName)
+                Text(title ?? config.ui.appName)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(subtitle)
@@ -165,14 +201,12 @@ struct AppIconView: View {
 
     var body: some View {
         Group {
-            if let img = bundleIcon() {
+            if !config.ui.logoPath.isEmpty,
+               let img = NSImage(contentsOfFile: config.ui.logoPath) {
                 Image(nsImage: img)
-                    .resizable().scaledToFill()
-            } else if !config.ui.logoPath.isEmpty,
-                      let img = NSImage(contentsOfFile: config.ui.logoPath) {
-                Image(nsImage: img)
-                    .resizable().scaledToFill()
-            } else if !config.ui.sfSymbolName.isEmpty {
+                    .resizable().scaledToFit()
+            } else if !config.ui.sfSymbolName.isEmpty,
+                      NSImage(systemSymbolName: config.ui.sfSymbolName, accessibilityDescription: nil) != nil {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.22)
                         .fill(config.accentColor)
@@ -180,6 +214,9 @@ struct AppIconView: View {
                         .font(.system(size: size * 0.45, weight: .semibold))
                         .foregroundStyle(.white)
                 }
+            } else if let img = bundleIcon() {
+                Image(nsImage: img)
+                    .resizable().scaledToFit()
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.22)
@@ -566,6 +603,7 @@ struct PrimaryActionButton: View {
 // MARK: - Deferral reason sheet
 
 struct DeferralReasonSheet: View {
+    @EnvironmentObject private var ctx: UIContext
     let config:    UIConfig
     let onConfirm: (String) -> Void
     let onCancel:  () -> Void
@@ -596,7 +634,7 @@ struct DeferralReasonSheet: View {
 
             VStack(spacing: 6) {
                 ForEach(reasons, id: \.self) { reason in
-                    Button(action: { selected = reason }) {
+                    Button(action: { selected = reason; ctx.noteAction("Select reason: " + reason) }) {
                         HStack(spacing: 12) {
                             ZStack {
                                 Circle()
@@ -686,31 +724,35 @@ struct PushSecondaryButtonStyle: ButtonStyle {
 
 struct PushToastPrimaryStyle: ButtonStyle {
     let color: Color
+    private var labelColor: Color {
+        guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return .white }
+        let brightness = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
+        return brightness > 0.6 ? .black : .white
+    }
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 6)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(labelColor)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
             .background(color.opacity(configuration.isPressed ? 0.75 : 1))
-            .cornerRadius(7)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
     }
 }
-
 struct PushToastSecondaryStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12))
-            .foregroundStyle(Color.secondary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .background(Color.primary.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.primary.opacity(0.09), lineWidth: 0.5))
-            .cornerRadius(7)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
+            .background(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.06))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.14), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
     }
 }
-
 
 // MARK: - Date picker sheet (Schedule…)
 //
@@ -720,6 +762,9 @@ struct PushToastSecondaryStyle: ButtonStyle {
 // the picker won't allow a time past the enforcement deadline.
 
 struct DatePickerSheet: View {
+    @EnvironmentObject private var ctx: UIContext
+    @State private var earliest = Date()
+    @State private var selectionError = ""
     let config:    UIConfig
     let deadline:  Date            // user can't pick a time past this
     let onConfirm: (Date) -> Void
@@ -742,7 +787,9 @@ struct DatePickerSheet: View {
         if in1Day  < deadline { picks.append(("Tomorrow",     in1Day)) }
         if in3Days < deadline { picks.append(("In 3 days",    in3Days)) }
         // Always offer "until deadline" as the last resort
-        picks.append(("Until deadline", deadline.addingTimeInterval(-3600)))
+        if deadline > now.addingTimeInterval(60) {
+            picks.append(("Until deadline", deadline))
+        }
         return picks
     }
 
@@ -771,11 +818,17 @@ struct DatePickerSheet: View {
                     .multilineTextAlignment(.center)
             }
 
+            if ctx.isManualTest && config.deadlineDate.map({ $0 <= Date() }) == true {
+                Text("Preview uses a sample deadline 7 days from now. Your saved policy is unchanged.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+
             // Quick-pick chips
             HStack(spacing: 8) {
                 ForEach(0..<quickPicks.count, id: \.self) { i in
                     Button {
                         chosen = quickPicks[i].date
+                        ctx.noteAction("Quick schedule: " + quickPicks[i].label)
                     } label: {
                         Text(quickPicks[i].label)
                             .font(.system(size: 12, weight: .medium))
@@ -808,12 +861,14 @@ struct DatePickerSheet: View {
                     .foregroundStyle(.secondary)
                 DatePicker("",
                            selection: $chosen,
-                           in: Date()...deadline,
+                           in: reminderPickerRange(now: earliest, deadline: deadline),
                            displayedComponents: [.date, .hourAndMinute])
                     .datePickerStyle(.compact)
                     .labelsHidden()
             }
 
+            if deadline <= earliest { Text("The deadline has passed; a later reminder is unavailable.").font(.caption).foregroundStyle(.orange) }
+            if !selectionError.isEmpty { Text(selectionError).font(.caption).foregroundStyle(.red) }
             // Confirmation
             VStack(spacing: 4) {
                 Text("You'll be reminded on")
@@ -825,7 +880,7 @@ struct DatePickerSheet: View {
             }
             .padding(.top, 4)
 
-            Text("Deadline is \(deadlineFormatted). After that, the update will install automatically.")
+            Text("Deadline: \(deadlineFormatted). Reminders must be scheduled before it.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -835,18 +890,21 @@ struct DatePickerSheet: View {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(PushSecondaryButtonStyle())
                 Spacer()
-                Button("Schedule") { onConfirm(chosen) }
+                Button("Schedule") {
+                    guard validReminderDate(chosen, deadline:deadline) else { selectionError = "Choose a future time before the deadline."; return }
+                    onConfirm(chosen)
+                }
+                    .disabled(!validReminderDate(chosen, deadline:deadline))
                     .buttonStyle(PushPrimaryButtonStyle(color: accent))
                     .keyboardShortcut(.return)
             }
         }
+        .onAppear { chosen = min(max(chosen, earliest), max(earliest, deadline)) }
+        .onChange(of: chosen) { _, _ in selectionError = "" }
         .padding(20)
         .frame(width: 380)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(NSColor.windowBackgroundColor))
-                .shadow(color: .black.opacity(0.25), radius: 24, y: 6)
-        )
+        .background(PopupSurface().clipShape(RoundedRectangle(cornerRadius:14)))
+        .shadow(color: .black.opacity(0.25), radius:24, y:6)
     }
 
     private func isSameMinute(_ a: Date, _ b: Date) -> Bool {

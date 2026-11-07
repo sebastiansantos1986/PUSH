@@ -1,0 +1,197 @@
+PUSH Entra Registration Nudges — engine 1.5.0 / PUSH Admin 0.4.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+SEE THE NEW EXPERIENCE FIRST
+Quit PUSH Admin and install PUSH-Entra-Nudge-0.4.0.pkg.
+Open /Applications/PUSH Admin.app yourself, then select Entra Registration.
+The page includes a four-stage preview, Self Service policy settings, reminder hours,
+current-user saved status, and separate Later / close / timeout counters.
+
+SAFE PREVIEW — WORKS ON YOUR UNENROLLED TEST MAC
+/Library/Management/PUSH/push-cli --version
+  Expected: push-cli v1.5.0
+sudo /Library/Management/PUSH/push-cli entra preview --stage 1
+sudo /Library/Management/PUSH/push-cli entra preview --stage 4
+
+Preview buttons cannot open Self Service, register a device, send email, or run Jamf
+inventory. Register Now reports the button choice only. Contact IT appears when a
+support email or HTTPS help URL is configured under Organization & appearance.
+These previews do not change production registration counters.
+
+WHAT THIS RELEASE DETECTS
+This module targets YOUR JAMF SELF SERVICE DEVICE-REGISTRATION WORKFLOW.
+It rechecks the current console user's com.jamf.management.jamfAAD.plist preference
+have_an_Azure_id. It does not use a historical marker as permanent proof.
+The first version supports the legacy Jamf Self Service app, not Self Service+.
+
+It distinguishes:
+  localRegistered           Registration evidence is present locally; stop reminders.
+  needsRegistration         Required setup exists, but local registration is absent/incomplete.
+  verificationUnavailable   Evidence or enrollment status cannot be interpreted safely.
+  setupMissing              Required Jamf / Company Portal / Self Service setup is missing.
+  notApplicable             The Mac is not enrolled; production reminders stay inactive.
+
+The local Jamf preference is advisory and may be stale or user-modifiable. It is NOT
+proof of a specific tenant's cloud registration, Intune compliance, or authorization.
+Cloud compliance is always shown as NOT ASSESSED. Do not use this local report or
+its extension attribute as an access-control/compliance decision.
+
+Platform SSO registration and Workplace Join certificates are not interchangeable
+with the Jamf registration workflow. This release does not use them to suppress a
+Jamf reminder, and does not query the user's Keychain. Other registration methods
+would need their own explicit detection adapters and live validation.
+
+DETECTION BEFORE PROMPTING
+Production checks require MDM enrollment, a trusted root-managed Jamf binary,
+Microsoft Company Portal, and Jamf Self Service with matching bundle IDs and valid
+signature integrity. Missing dependencies or uncertain results are reported for IT;
+PUSH does not repeatedly nag the user to fix IT setup.
+
+Only the active user's preference is checked. Counters are stored separately by UID;
+a changed short name resets that UID's cached history rather than attributing an old
+account's state to another user. No Microsoft password, token, certificate, or UPN
+is collected or written to logs. The user account name is kept for local state matching.
+
+REGISTER NOW AND FOLLOW-UP
+Register Now opens the configured Self Service policy as the logged-in user using:
+  jamfselfservice://content?entity=policy&id=876&action=view
+876 is the default from your script and can be changed in the tool or YAML.
+Opening a policy does not mark registration complete and does not silently execute it.
+The user follows your managed workflow there, which may require normal Microsoft
+sign-in/MFA. PUSH itself never asks for or captures those credentials.
+
+The next monitor check revalidates the local preference. When it transitions to local
+registration detected, reminders stop and an optional Jamf recon refreshes inventory.
+Inventory sync is separate from registration evidence. A failed sync retries at most
+hourly and does not cause registration prompts. The check command never runs recon.
+
+Working hours and daily caps govern prompts, not evidence checks. A successful local
+registration can therefore be detected outside business hours without prompting.
+If evidence later becomes absent/incomplete again, reminders can resume appropriately.
+
+ESCALATION FROM YOUR SCRIPT
+Explicit Later clicks   Stage   Maximum attempts/day   Minimum gap
+0–3                    1       2                      4 hours
+4–7                    2       3                      3 hours
+8–11                   3       4                      2 hours
+12+                    4       6                      90 minutes
+
+Defaults: weekdays, 08:00–18:00 local time, skip active meetings/screen sharing.
+Only explicit Later advances escalation. Closing, timeouts, Register Now clicks,
+and successful Self Service opens have separate counters. Failures are not choices.
+The daily budget is reserved BEFORE showing a window so failures cannot create spam.
+Concurrent Entra runs are locked; existing PUSH/jamfHelper windows defer the reminder.
+An active or pending macOS installation also defers a new registration reminder.
+
+SET UP AN ENROLLED TEST MAC
+1. Disable the old Jamf registration reminder script/policy before enabling this module,
+   so two systems do not remind users independently. PUSH does not modify your Jamf
+   scripts, policies, smart groups, or old Forcepoint markers.
+2. In Entra Registration, set the correct Self Service registration policy ID and
+   validate the Company Portal / legacy Self Service paths for your environment.
+3. Configure IT contact details under Organization & appearance.
+4. Enable Entra reminders in the draft. Review Debug > dryRun and apply the policy.
+   Existing macOS/app update settings are preserved; turning off global dry-run can
+   affect those modules too if their schedules are already active.
+5. Run this yourself for local detection only:
+   sudo /Library/Management/PUSH/push-cli entra check
+   /Library/Management/PUSH/push-cli entra status
+6. For an ENTRA-ONLY test, enable its independent monitor:
+   sudo /Library/Management/PUSH/push-cli entra install-daemon
+   This checks every 5 minutes and can show REAL registration reminders immediately
+   if eligible. It does not enable the macOS/app scheduler.
+7. Pause only the registration monitor with:
+   sudo /Library/Management/PUSH/push-cli entra uninstall-daemon
+
+The Deployment Enable monitoring button can enable BOTH the regular macOS/app
+scheduler and the independent registration monitor, according to the installed
+policy. The confirmation shows which modules are enabled. Pause monitoring stops both.
+
+YAML — MERGE INTO ONE EXISTING entra SECTION
+entra:
+  enabled: true
+  policyID: "876"
+  startHour: 8
+  endHour: 18
+  weekdaysOnly: true
+  skipMeetings: true
+  reconOnRegistration: true
+  selfServicePath: "/Applications/Self Service.app"
+  companyPortalPath: "/Applications/Company Portal.app"
+  jamfBinaryPath: "/usr/local/bin/jamf"
+  message: ""
+
+Leave message blank to use escalation-aware messages. A custom message replaces the
+body at every stage. These settings do not change macOS or app update deadlines.
+
+COMMAND REFERENCE
+push-cli entra status             Saved local per-user result; no detection or actions
+push-cli entra status --json      Structured cached result; compliance=notAssessed
+push-cli entra status --ea        Cached Jamf extension-attribute result
+sudo push-cli entra check         Refresh local evidence and state; no popup/open/recon
+sudo push-cli entra notify        LIVE reminder, respecting hours/caps/gaps
+sudo push-cli entra notify --force
+                                  Override reminder timing only. Never prompt an
+                                  already locally registered user or bypass missing/
+                                  uncertain production setup. Register Now opens the
+                                  real configured policy if the user chooses it.
+sudo push-cli entra preview --stage 1
+                                  Safe simulated popup; stages 1–4 supported
+sudo push-cli entra install-daemon / uninstall-daemon
+                                  Enable/pause the dedicated registration monitor
+
+Append --dry-run to check/notify for no detection, popup, Self Service, recon, or state
+changes. Preview is deliberately a UI test and is separate from dry-run commands.
+
+ISOLATED TIMING TESTS
+--test on an explicit check/notify uses entra-test-state.json, not production counters.
+It scales gaps from hours to minutes and resets the test budget hourly. It can bypass
+the enrollment check on an explicitly selected lab machine, but still requires the
+Jamf/Company Portal/Self Service setup. Register Now and Contact IT are simulated in
+this mode; no Self Service or recon is run. Scheduled production checks never use it.
+Use entra status --test to inspect its isolated result. For an actual registration
+workflow test, use an enrolled test Mac and a test policy ID without --test.
+Daily caps still apply in test mode; preview stages are the quickest way to see all four.
+
+SAVED STATE AND MONITOR
+Production history: /Library/Management/PUSH/entra-state.json
+Test history:       /Library/Management/PUSH/entra-test-state.json
+Monitor:            /Library/LaunchDaemons/com.push.entra-registration.plist
+Monitor interval:   300 seconds, separate from the macOS/app interval
+Monitor output:     /Library/Management/PUSH/logs/entra-monitor.log
+
+Malformed state fails closed rather than resetting a prompt budget. Old marker files
+are neither trusted, deleted, nor changed. Reports are cached and include checkedAt;
+check freshness before using them for help-desk reporting.
+
+OPTIONAL JAMF EXTENSION ATTRIBUTE
+#!/bin/zsh
+/Library/Management/PUSH/push-cli entra status --ea
+
+This reports current-console-user cached LOCAL evidence only, or disabled / notChecked /
+No console user / unreadableState. It is not a cloud-compliance or multi-user device
+compliance attestation. Your existing Self Service registration policy can retain its
+own authoritative registration and inventory integration.
+
+PACKAGE AND VERIFICATION
+This is an unsigned local test package; app/CLI binaries are ad-hoc signed, universal
+for Apple Silicon and Intel, with Sebastian Santos attribution preserved.
+It does not launch PUSH, register a device, update applications, install macOS, restart,
+or enable monitoring. Existing configuration, credentials, logos, downloads, and
+production state are preserved. Prior binaries, config, state, and both schedule
+plists are backed up under /Library/Management/PUSH-backups. Both monitors remain
+paused after installation. The original Desktop Xcode project is not overwritten.
+
+Builds and offline checks cover local evidence parsing, unknown/error states, stage
+boundaries, caps/gaps, hours, payload validation, per-user state, distinct button
+responses, configuration export, preview behavior, and previous PUSH functionality.
+No real enrollment check, registration-preference query, Jamf recon, Self Service launch,
+Microsoft sign-in, user popup, application update, macOS upgrade, or reboot was run by
+Codex. Live registration testing and visual inspection remain for you on your test Mac.
+
+REFERENCES
+Registration and compliance are separate:
+https://learn.microsoft.com/en-us/intune/device-security/compliance/jamf-entra-id
+Platform SSO is its own managed registration workflow:
+https://learn.microsoft.com/en-us/entra/identity/devices/device-join-microsoft-entra-company-portal

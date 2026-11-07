@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: UIConfig.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // UIConfig.swift — White-label config model for PUSH
 // Everything comes from config.yaml — nothing hardcoded.
 
@@ -30,6 +40,8 @@ struct UIConfig {
         var logoPath:                String = ""
         var sfSymbolName:            String = ""
         var popupWidth:              Int    = 540
+        var popupBackgroundStyle:    String = "solid"
+        var popupOpacityPercent:     Int    = 85
         var itContactEmail:          String = ""
         var itContactPhone:          String = ""
         var helpURL:                 String = ""
@@ -162,6 +174,9 @@ struct UIConfig {
             cfg.update.macOSName            = str(u, "macOSName", "macOS")
             cfg.update.releaseType          = str(u, "releaseType", "minor")
             cfg.update.deadline             = str(u, "deadline")
+            if cfg.update.deadline.isEmpty && str(u, "automaticDeadlineTarget") == cfg.update.targetVersion {
+                cfg.update.deadline = str(u, "automaticDeadline")
+            }
             cfg.update.maxDeferrals         = int(u, "maxDeferrals", 3)
             cfg.update.nudgeIntervalSeconds = int(u, "nudgeIntervalSeconds", 3600)
         }
@@ -172,6 +187,8 @@ struct UIConfig {
             cfg.ui.accentColorHex           = str(u, "accentColorHex", "#0A84FF")
             cfg.ui.logoPath                 = str(u, "logoPath", "")
             cfg.ui.sfSymbolName             = str(u, "sfSymbolName", "")
+            cfg.ui.popupBackgroundStyle = str(u, "popupBackgroundStyle", "solid")
+            cfg.ui.popupOpacityPercent = min(100, max(55, int(u, "popupOpacityPercent", 85)))
             cfg.ui.popupWidth               = int(u, "popupWidth", 500)
             cfg.ui.itContactEmail           = str(u, "itContactEmail", "")
             cfg.ui.itContactPhone           = str(u, "itContactPhone", "")

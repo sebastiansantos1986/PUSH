@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: PopupCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // PopupCommand.swift — Manually trigger any push-ui popup state
 
 import Foundation
@@ -6,7 +16,7 @@ struct PopupCommand {
     let args: [String]
 
     static let validStates = [
-        "toast", "softNudge", "hardBlock", "preflightPower", "preflightDisk",
+        "toast", "appUpdates", "entraRegistration", "softNudge", "hardBlock", "preflightPower", "preflightDisk",
         "passwordPrompt", "downloading", "installing", "rebooting", "compliant", "error",
         "rebootNudge", "rebootForce"
     ]
@@ -24,6 +34,11 @@ struct PopupCommand {
             exit(1)
         }
 
+        guard state != "passwordPrompt" || allowsUserPasswordPrompts else {
+            cliPrint("User password prompts are disabled. IT must provide managed authorization.")
+            return
+        }
+
         let uiPath = resolveUIBinary()
         guard FileManager.default.fileExists(atPath: uiPath) else {
             cliError("push-ui not found at \(uiPath)")
@@ -36,8 +51,20 @@ struct PopupCommand {
 
         var cmd = "\"\(uiPath)\" --state \"\(state)\""
         if !cfgPath.isEmpty { cmd += " --config \"\(cfgPath)\"" }
-        cmd += " --deferrals \(deferralCount)"
+        cmd += " --deferrals \(deferralCount) --manual-test"
+        if let style = argValue("--background-style", in:args) {
+            guard ["solid","frosted"].contains(style) else { cliError("Background style must be solid or frosted"); return }
+            cmd += " --background-style " + style
+        }
+        if let text = argValue("--background-opacity", in:args) {
+            guard let percent = Int(text), (55...100).contains(percent) else { cliError("Background opacity must be 55–100"); return }
+            cmd += " --background-opacity " + String(percent)
+        }
 
+        if state == "entraRegistration", let text = argValue("--entra-stage",in:args) {
+            guard let stage = Int(text), (1...4).contains(stage) else { cliError("Entra preview stage must be 1–4."); return }
+            cmd += " --entra-stage " + String(stage)
+        }
         // State-specific options
         if state == "downloading" {
             if let p = argValue("--download-progress", in: args) { cmd += " --download-progress \(p)" }
@@ -50,84 +77,20 @@ struct PopupCommand {
         if state == "error" {
             if let e = argValue("--error", in: args) { cmd += " --error \"\(e)\"" }
         }
-        if args.contains("--forced") {
-            cmd += " --forced"
-        }
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
 
-        // Use launchUIAsUser/runUIBlocking so window appears on the user's screen.
-        // Toast is non-blocking (fire and forget).
-        // All other states are blocking (wait for user action).
-        let exitCode: Int
-        if state == "toast" {
-            launchUIAsUser(cmd)
-            exitCode = 0
-        } else {
-            exitCode = Int(runUIBlocking(cmd))
-        }
-        drainUITamperEvents()
-
-        let isRebootState = (state == "rebootNudge" || state == "rebootForce")
-        let isLockedState = args.contains("--forced")
-            || state == "downloading"
-            || state == "installing"
-            || state == "hardBlock"
-            || state == "passwordPrompt"
-            || state == "preflightDisk"
-            || state == "preflightPower"
-            || state == "rebooting"
-
-        switch exitCode {
-        case 0:
-            if isRebootState {
-                cliSuccess("User chose Restart")
-            } else {
-                cliSuccess("User chose Install")
-            }
-        case 1:
-            if isRebootState {
-                cliSuccess("User deferred restart")
-            } else {
-                cliSuccess("User deferred")
-            }
-        case 2: cliPrint("User dismissed")
-        case 3:
-            // User scheduled a specific reminder time (only possible from softNudge)
-            // OR a toast auto-dismissed (toasts use this code on timeout)
-            if state == "toast" {
-                cliPrint("Toast auto-dismissed")
-            } else {
-                let scheduledFile = "/tmp/push-scheduled-until"
-                if let iso = try? String(contentsOfFile: scheduledFile, encoding: .utf8)
-                                    .trimmingCharacters(in: .whitespacesAndNewlines) {
-                    cliSuccess("User scheduled reminder for \(iso)")
-                } else {
-                    cliPrint("User scheduled reminder (no timestamp recorded)")
-                }
-            }
-        case 4: cliPrint("Power timeout")
-        default:
-            if isLockedState && (exitCode == 143 || exitCode == 137 || exitCode == 9 || exitCode == 15) {
-                cliLog("[Tamper] Locked popup '\(state)' exited with code \(exitCode) — possible force quit or killed popup")
-            } else {
-                cliLog("[Popup] Exited with code \(exitCode)")
-            }
-        }
-    }
-
-    private func drainUITamperEvents() {
-        let path = "/tmp/push-ui-tamper-events.log"
-        guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
-              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
-
-        for line in raw.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            cliLog("[Tamper] \(trimmed)")
-        }
-        try? FileManager.default.removeItem(atPath: path)
+        // Manual tests wait for the actual button result. They never invoke an install.
+        cliPrint("Opening \(state) preview… Waiting for the window, then your button choice. Control+C cancels this Terminal command.")
+        let exitCode = runUIBlocking(cmd)
+        let message = popupResultMessage(state: state, exitCode: exitCode)
+        if exitCode == 3, state != "toast",
+           let date = try? String(contentsOfFile:"/tmp/push-scheduled-until",encoding:.utf8).trimmingCharacters(in:.whitespacesAndNewlines), !date.isEmpty {
+            cliSuccess("User scheduled a reminder for \(date)")
+        } else if exitCode == 0 { cliSuccess(message) }
+        else if exitCode == 5 && state != "toast" { cliError(message) }
+        else if [1, 2, 3, 4, 5, 6].contains(exitCode) { cliPrint(message) }
+        else { cliError(message) }
     }
 }

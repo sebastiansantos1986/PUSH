@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>PUSHAdmin</string>
+<key>CFBundleIdentifier</key><string>com.push.admin</string>
+<key>CFBundleName</key><string>PUSH Admin</string>
+<key>CFBundleDisplayName</key><string>PUSH Admin</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.5.0</string>
+<key>CFBundleVersion</key><string>10</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Sebastian Santos. All rights reserved.</string>
+<key>NSAppleEventsUsageDescription</key><string>PUSH Admin requests administrator authorization only when you choose to apply configuration or change the test schedule.</string>
+</dict></plist>

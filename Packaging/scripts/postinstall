@@ -1,0 +1,48 @@
+#!/bin/bash
+# Developer: Sebastian Santos
+# Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+# No app launch, daemon bootstrap, network operation, download, or upgrade.
+set -euo pipefail
+[[ "${3:-/}" == / ]] || exit 1
+base=/Library/Management/PUSH
+/bin/mkdir -p "$base/logs" "$base/downloads" /usr/local/bin
+/usr/sbin/chown root:wheel "$base" "$base/push-cli" "$base/push-ui.app"
+/bin/chmod 755 "$base" "$base/push-cli" "$base/push-ui.app"
+# Recover preserved data if Installer removed a file from an older package receipt.
+if [[ -f "$base/last-package-backup.txt" ]]; then
+    backup="$(/bin/cat "$base/last-package-backup.txt")"
+    case "$backup" in /Library/Management/PUSH-backups/*) ;; *) exit 1 ;; esac
+    [[ -d "$backup" && ! -L "$backup" && "$(/usr/bin/stat -f %u "$backup")" == 0 ]] || exit 1
+    for item in config.yaml config.json state.json detections.json apps-state.json entra-state.json health; do
+        if [[ ! -e "$base/$item" && -e "$backup/$item" ]]; then
+            /usr/bin/ditto "$backup/$item" "$base/$item"
+        fi
+    done
+fi
+# Readiness records explain the deliberate local-test pause; no service is started.
+health="$base/health"
+if [[ ! -e "$health" ]]; then /bin/mkdir "$health"; /usr/sbin/chown root:wheel "$health"; /bin/chmod 755 "$health"; fi
+if [[ -d "$health" && ! -L "$health" && "$(/usr/bin/stat -f %u "$health")" == 0 ]]; then
+    /bin/chmod 755 "$health"
+    for monitor in main entra; do
+        # Remove the directory entry first so a prior symlink is never followed.
+        /bin/rm -f "$health/intent-$monitor.json"
+        printf '{"desired":"paused","changedAt":%s,"reason":"Local test package paused monitoring; enable explicitly after policy review"}\n' "$(( $(/bin/date +%s) - 978307200 ))" > "$health/intent-$monitor.json"
+        /bin/chmod 644 "$health/intent-$monitor.json"
+    done
+fi
+# Preserve existing configuration and state verbatim. Defaults are used only on a fresh install.
+if [[ ! -e "$base/config.yaml" && ! -e "$base/config.json" ]]; then
+    /bin/cp "$base/Local-Test/default-config.yaml" "$base/config.yaml"
+    /usr/sbin/chown root:wheel "$base/config.yaml"
+    /bin/chmod 644 "$base/config.yaml"
+fi
+if [[ -e /usr/local/bin/push-cli && ! -L /usr/local/bin/push-cli ]]; then
+    /bin/rm /usr/local/bin/push-cli
+fi
+/bin/ln -sfn "$base/push-cli" /usr/local/bin/push-cli
+printf '%s\n' 'PUSH 1.6.0 installed for local verification.' \
+    'Configuration, state, and Keychain credentials were preserved.' \
+    'The previous schedule is paused. No application or upgrade was started.' \
+    'Run /Library/Management/PUSH/push-cli --version to confirm the installed build.' \
+    'Open PUSH Admin and select Readiness to review local status.'

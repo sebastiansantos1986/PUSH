@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: InstallCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // InstallCommand.swift — Full macOS install workflow
 //
 // Download chain:
@@ -8,6 +18,7 @@
 // Restart flow: user-friendly prompt → preflight → download → install → reboot
 
 import Foundation
+import Darwin
 
 /// Carries both the admin account name and its password through the install path.
 /// For LAPS we use the managed admin account (e.g. CasperLocalAdmin); for keychain
@@ -34,8 +45,39 @@ struct InstallWorkflow {
     var skipInitialPrompt: Bool = false
 
     func run() {
-        let isDebug = config.debug.dryRun
-        cliLog("[Install] Starting for \(config.update.targetVersion)\(isDebug ? " (dry-run)" : "")")
+        guard numericOSVersion(config.update.targetVersion) != nil else {
+            cliError("A complete numeric macOS target version is required (for example 26.1).")
+            return
+        }
+        // Dry run exits before UI, downloads, credentials, state writes, or installer execution.
+        if config.debug.dryRun {
+            cliPrint("Dry run: would install macOS \(config.update.targetVersion). No actions performed.")
+            return
+        }
+        guard getuid() == 0 else { cliError("Installation requires root."); return }
+        guard installationIsActive() == false else {
+            cliError("Another installer/update is active, or activity cannot be verified. Installation was not started."); return
+        }
+        guard preparePushRuntime() else { cliError("Cannot prepare secure runtime directory."); return }
+        // Kernel-held lock prevents concurrent workflows, and is released after a crash.
+        try? FileManager.default.createDirectory(atPath: managedBase, withIntermediateDirectories: true)
+        let lock = open(managedBase + "/install.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+        guard lock >= 0 else { cliError("Cannot open installation lock."); return }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { cliInfo("Installation:", "Already running"); return }
+        defer { flock(lock, LOCK_UN) }
+        guard let pending = try? loadStateForAction() else {
+            cliError("Saved installation state is unreadable. No installation was started."); return
+        }
+        guard !pending.installStarted else {
+            cliInfo("Installation:", "Awaiting reboot verification. Run auto-check after restarting.")
+            return
+        }
+        if versionGTE(currentMacOSVersion(), config.update.targetVersion) {
+            cliSuccess("This Mac already meets the requested macOS version.")
+            return
+        }
+        cliLog("[Install] Starting for \(config.update.targetVersion)")
 
         // Prevent sleep for the entire install workflow — download + install can
         // take 20-30 min and we cannot have the machine sleep mid-way.
@@ -72,11 +114,6 @@ struct InstallWorkflow {
             exit(1)
         }
 
-        if isDebug {
-            cliSuccess("DEBUG — installer ready: \(installer). Skipping install.")
-            return
-        }
-
         // ── Step 3: Prompt restart ──────────────────────────────────────────
         // Skip if user already clicked Install in the AutoCheck nudge popup.
         if skipInitialPrompt {
@@ -91,19 +128,7 @@ struct InstallWorkflow {
 
     private func findPendingNativeUpdate(version: String) -> String? {
         let (output, _) = shell("/usr/sbin/softwareupdate --list 2>&1")
-        var currentLabel = ""
-        for line in output.components(separatedBy: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("* Label:") {
-                currentLabel = t.replacingOccurrences(of: "* Label:", with: "")
-                    .trimmingCharacters(in: .whitespaces)
-            } else if t.contains("Version: \(version)")
-                       && t.lowercased().contains("action: restart")
-                       && !currentLabel.isEmpty {
-                return currentLabel
-            }
-        }
-        return nil
+        return nativeUpdateLabel(version: version, output: output, restartOnly: true)
     }
 
     private func installNativePendingUpdate(label: String, uiPath: String, cfgPath: String) {
@@ -123,124 +148,37 @@ struct InstallWorkflow {
 
         // Resolve credentials before showing installing UI
         var creds: InstallCredentials? = nil
-        if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
+        if isAppleSilicon() {
             creds = resolveInstallCredentials(uiPath: uiPath, cfgPath: cfgPath,
                                               skipInitialPrompt: skipInitialPrompt,
                                               contextLabel: "native path")
         }
 
+        guard credentialsAreUsable(creds, uiPath: uiPath, cfgPath: cfgPath) else { return }
+        let checks = PreflightChecks(config: config)
+        if let result = checks.checkBattery(), case .fail(let reason, _) = result {
+            showError(reason, uiPath: uiPath, cfgPath: cfgPath); return
+        }
+        if let result = checks.checkDisk(PreflightChecks.availableDiskGB()), case .fail(let reason, _) = result {
+            showError(reason, uiPath: uiPath, cfgPath: cfgPath); return
+        }
         guard let user = consoleUser() else {
             cliLog("[Install] No console user found — cannot trigger native update")
             return
         }
 
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart\(forcedUIFlag)")
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart")
         Thread.sleep(forTimeInterval: 2.0)
 
-        var state = loadState(); state.installStarted = true; try? saveState(state)
-
-        // Stream softwareupdate output so the UI can show real download progress.
-        // Uses super's exact pattern for macOS 13+ Apple Silicon:
-        //   echo pwd | launchctl asuser <uid> sudo -u root softwareupdate --install ... --user <acct> --stdinpass
-        // --force is required — without it softwareupdate ignores queued updates.
-        streamNativeInstall(label: label, creds: creds, user: user,
-                            uiPath: uiPath, cfgPath: cfgPath)
+        streamNativeInstall(label: label, creds: creds, user: user)
     }
 
-    private func streamNativeInstall(label: String, creds: InstallCredentials?,
-                                     user: (name: String, uid: Int),
-                                     uiPath: String, cfgPath: String) {
-        let progressFile = "/tmp/push-install-progress"
-        let logFile      = "/tmp/push-native-install.log"
-        let doneFile     = "/tmp/push-native-done.flag"
-
-        shell("rm -f \"\(logFile)\" \"\(doneFile)\" 2>/dev/null; true")
-        shell("touch \"\(logFile)\"; chmod 666 \"\(logFile)\"")
-
-        // Build the install command matching super's macOS 13+ Apple Silicon pattern.
-        // --user expects the Secure-Token admin account (may differ from the console
-        // user when LAPS or a config-supplied admin is in use).
-        let arguments: [String]
-        let stdinText: String?
-        if let c = creds {
-            cliLog("[Install] Passing credentials for admin user: \(c.username) (native path)")
-            arguments = [
-                "asuser", "\(user.uid)",
-                "/usr/bin/sudo", "-u", "root",
-                "/usr/sbin/softwareupdate",
-                "--install", label,
-                "--restart", "--force", "--no-scan", "--agree-to-license",
-                "--user", c.username,
-                "--stdinpass"
-            ]
-            stdinText = c.password + "\n"
-        } else {
-            // Intel or password not required
-            arguments = [
-                "asuser", "\(user.uid)",
-                "/usr/bin/sudo", "-u", "root",
-                "/usr/sbin/softwareupdate",
-                "--install", label,
-                "--restart", "--force", "--no-scan", "--agree-to-license"
-            ]
-            stdinText = nil
-        }
-
-        let process: Process
-        do {
-            process = try startStreamingProcess(executable: "/bin/launchctl",
-                                                arguments: arguments,
-                                                stdinText: stdinText,
-                                                logFile: logFile)
-        }
-        catch { cliLog("[Install] Cannot launch native install: \(error)"); return }
-
-        var processedLines = 0
-        while process.isRunning {
-            Thread.sleep(forTimeInterval: 1.5)
-            ensureActiveInstallUI(state: "installing",
-                                  uiPath: uiPath,
-                                  cfgPath: cfgPath,
-                                  extraArgs: "--quick-restart")
-            guard let raw = try? String(contentsOfFile: logFile, encoding: .utf8) else { continue }
-            let lines    = raw.components(separatedBy: "\n").filter { !$0.isEmpty }
-            let newLines = Array(lines.dropFirst(processedLines))
-            processedLines = lines.count
-
-            for line in newLines {
-                cliLog("[softwareupdate] \(line)")
-                // Parse "Downloading macOS Tahoe 26.4: 50.65%" or "Downloading: 50.65%"
-                if let pct = parseNativeProgress(line) {
-                    let subtitle: String
-                    if line.lowercased().contains("download") {
-                        subtitle = "Downloading macOS… \(String(format: "%.1f", pct * 100))%"
-                    } else if line.lowercased().contains("install") || line.lowercased().contains("preparing") {
-                        subtitle = "Preparing installation…"
-                    } else {
-                        subtitle = "\(String(format: "%.1f", pct * 100))% complete"
-                    }
-                    try? "\(String(format: "%.3f", pct))\n\(subtitle)"
-                        .write(toFile: progressFile, atomically: true, encoding: .utf8)
-                }
-            }
-        }
-        process.waitUntilExit()
-        appendLine("EXIT_CODE:\(process.terminationStatus)", to: logFile)
-
-        let finalLog = (try? String(contentsOfFile: logFile, encoding: .utf8)) ?? ""
-        if finalLog.contains("EXIT_CODE:0") {
-            cliLog("[Install] Native softwareupdate completed — restart initiated")
-        } else {
-            cliLog("[Install] Native softwareupdate may have failed. Last lines:\n\(finalLog.components(separatedBy: "\n").suffix(10).joined(separator: "\n"))")
-            // If we used a saved user password, clear it so the user gets re-prompted
-            // on next attempt instead of looping the same auth failure.
-            if let c = creds, c.fromSavedUserPassword {
-                cliLog("[Install] softwareupdate rejected saved user password — clearing keychain entry for \(c.username)")
-                deleteUserPasswordFromLoginKeychain(account: c.username)
-            }
-        }
-        shell("rm -f \"\(doneFile)\" 2>/dev/null; true")
-        try? FileManager.default.removeItem(atPath: progressFile)
+    private func streamNativeInstall(label: String, creds: InstallCredentials?, user: (name: String, uid: Int)) {
+        var arguments = ["asuser", String(user.uid), "/usr/bin/sudo", "-u", "root", "--",
+            "/usr/sbin/softwareupdate", "--install", label, "--restart", "--force", "--no-scan", "--agree-to-license"]
+        if let creds { arguments += ["--user", creds.username, "--stdinpass"] }
+        performInstaller(executable: "/bin/launchctl", arguments: arguments, creds: creds,
+                         uiPath: resolveUIBinary(), cfgPath: resolvedConfigPath ?? "")
     }
 
     private func parseNativeProgress(_ line: String) -> Double? {
@@ -326,29 +264,16 @@ struct InstallWorkflow {
         }
 
         var creds: InstallCredentials? = nil
-        if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
+        if isAppleSilicon() {
             creds = resolveInstallCredentials(uiPath: uiPath, cfgPath: cfgPath,
                                               skipInitialPrompt: skipInitialPrompt,
                                               contextLabel: "startosinstall")
         }
-
-        // Secure Token preflight — startosinstall on Apple Silicon requires the
-        // authorizing account to have Secure Token. Check the account that will
-        // actually be passed to startosinstall, which may be LAPS/admin rather
-        // than the console user.
-        if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
-            let authUser = creds?.username ?? consoleUser()?.name ?? ""
-            if authUser.isEmpty || !userHasSecureToken(authUser) {
-                cliLog("[Install] Secure Token preflight failed for \(authUser.isEmpty ? "(unknown)" : authUser)")
-                let reason = "The account authorized for this update isn't enabled for macOS upgrades. Please contact IT — they'll need to grant Secure Token before this Mac can upgrade."
-                showError(reason, uiPath: uiPath, cfgPath: cfgPath)
-                return
-            }
-        }
+        guard credentialsAreUsable(creds, uiPath: uiPath, cfgPath: cfgPath) else { return }
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\"\(forcedUIFlag)")
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\"")
         Thread.sleep(forTimeInterval: 2.0)
 
         runStartOSInstall(installer: installer, creds: creds,
@@ -375,7 +300,7 @@ struct InstallWorkflow {
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.5)
-        launchUIAsUser("\"\(uiPath)\" --state downloading --config \"\(cfgPath)\" --download-progress 0 --download-subtitle \"Preparing download…\"\(forcedUIFlag)")
+        launchUIAsUser("\"\(uiPath)\" --state downloading --config \"\(cfgPath)\" --download-progress 0 --download-subtitle \"Preparing download…\"")
         Thread.sleep(forTimeInterval: 1.0)
 
         let isMajor = config.update.releaseType == "major"
@@ -387,13 +312,11 @@ struct InstallWorkflow {
         if isMajor, let mist = findMistCLI() {
             cliLog("[Install] Major upgrade — using mist-cli as primary download method")
             try? "0.01\nConnecting to Apple servers…"
-                .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
 
             let mistOK = streamDownload(
-                cmd:  "\"\(mist)\" download installer \"\(version)\" application --output-directory \"/Applications\" --compatible --force --no-ansi",
-                tool: "mist-cli",
-                uiPath: uiPath,
-                cfgPath: cfgPath
+                executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", "/Applications", "--compatible", "--force", "--no-ansi"],
+                tool: "mist-cli"
             )
             if mistOK, let found = findInstallerInApplications() {
                 cliLog("[Install] mist-cli succeeded: \(found)")
@@ -402,7 +325,7 @@ struct InstallWorkflow {
             }
             cliLog("[Install] mist-cli failed — falling back to softwareupdate")
             try? "0.01\nSwitching to alternate download method…"
-                .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
             Thread.sleep(forTimeInterval: 1.5)
         } else if isMajor {
             cliLog("[Install] Major upgrade — mist-cli not found, using softwareupdate")
@@ -417,15 +340,13 @@ struct InstallWorkflow {
             let sz = sizeOut.trimmingCharacters(in: .whitespaces)
             cliLog("[Install] Found partial download (\(sz)) — softwareupdate will resume")
             try? "0.01\nResuming previous download (\(sz) already downloaded)…"
-                .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
         }
 
         cliLog("[Install] Using softwareupdate --fetch-full-installer \(version)")
         let swuOK = streamDownload(
-            cmd:  "softwareupdate --fetch-full-installer --full-installer-version \"\(version)\"",
-            tool: "softwareupdate",
-            uiPath: uiPath,
-            cfgPath: cfgPath
+            executable: "/usr/sbin/softwareupdate", arguments: ["--fetch-full-installer", "--full-installer-version", version],
+            tool: "softwareupdate"
         )
         if swuOK, let found = findInstallerInApplications() {
             cliLog("[Install] softwareupdate succeeded: \(found)")
@@ -435,7 +356,7 @@ struct InstallWorkflow {
         cliLog("[Install] softwareupdate failed — trying mist-cli as last resort")
 
         try? "0.01\nSwitching to alternate download method…"
-            .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+            .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
         Thread.sleep(forTimeInterval: 1.5)
 
         // Last resort: mist-cli for minor updates if softwareupdate also failed
@@ -446,10 +367,8 @@ struct InstallWorkflow {
         }
         cliLog("[Install] Last resort — mist-cli at \(mist)")
         let mistOK2 = streamDownload(
-            cmd:  "\"\(mist)\" download installer \"\(version)\" application --output-directory \"/Applications\" --compatible --force --no-ansi",
-            tool: "mist-cli",
-            uiPath: uiPath,
-            cfgPath: cfgPath
+            executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", "/Applications", "--compatible", "--force", "--no-ansi"],
+            tool: "mist-cli"
         )
         if mistOK2, let found = findInstallerInApplications() {
             cliLog("[Install] mist-cli (last resort) succeeded: \(found)")
@@ -463,62 +382,24 @@ struct InstallWorkflow {
     }
 
     @discardableResult
-    private func streamDownload(cmd: String, tool: String,
-                                uiPath: String, cfgPath: String) -> Bool {
-        let logFile     = "/tmp/push-dl-progress.log"
-        let doneFile    = "/tmp/push-dl-done.flag"
-        let wrapperPath = "/tmp/push-dl-wrapper.sh"
-
-        shell("rm -f \"\(logFile)\" \"\(doneFile)\" \"\(wrapperPath)\" 2>/dev/null; true")
-        shell("touch \"\(logFile)\"; chmod 666 \"\(logFile)\"")
-
-        // For softwareupdate --fetch-full-installer: run directly without a pipe.
-        // It needs a TTY to output progress, and piping destroys that.
-        // We track progress via disk polling instead (installerDiskProgress).
-        // For mist-cli: pipe works fine since mist outputs progress without a TTY.
-        let isSWU = tool == "softwareupdate"
-        let wrapper: String
-        if isSWU {
-            // softwareupdate outputs "Installing: X%" only when stdout is a file, not a pipe.
-            // Redirecting directly to logFile preserves that output.
-            // sed converts \r to \n so percentages appear on separate lines for parsing.
-            wrapper = """
-#!/bin/bash
-\(cmd) >> "\(logFile)" 2>&1
-# Convert carriage returns to newlines so parser can read individual % lines
-sed -i \'\' \'s/\\r/\\n/g\' "\(logFile)" 2>/dev/null || true
-TOOL_EXIT=$?
-echo "EXIT_CODE:$TOOL_EXIT" >> "\(logFile)"
-echo "DONE" > "\(doneFile)"
-"""
-        } else {
-            wrapper = """
-#!/bin/bash
-\(cmd) 2>&1 | tr '\r' '\n' | while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    echo "$line" >> "\(logFile)"
-done
-TOOL_EXIT=${PIPESTATUS[0]}
-echo "EXIT_CODE:$TOOL_EXIT" >> "\(logFile)"
-echo "DONE" > "\(doneFile)"
-"""
-        }
-        do { try wrapper.write(toFile: wrapperPath, atomically: true, encoding: .utf8) }
-        catch { cliLog("[Install] Cannot write wrapper: \(error)"); return false }
-        shell("chmod +x \"\(wrapperPath)\"")
-
-        // Get expected installer size from mdmclient so we can show disk-based progress.
-        // softwareupdate --fetch-full-installer outputs nothing to stdout during download,
-        // so we track the growing .app bundle on disk instead.
+    private func streamDownload(executable: String, arguments: [String], tool: String) -> Bool {
+        let directory = URL(fileURLWithPath: "/private/var/run/com.push").appendingPathComponent(UUID().uuidString)
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                     attributes: [.posixPermissions: 0o700]) } catch { return false }
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let logFile = directory.appendingPathComponent("download.log").path
+        guard FileManager.default.createFile(atPath: logFile, contents: nil, attributes: [.posixPermissions: 0o600]),
+              let output = FileHandle(forWritingAtPath: logFile) else { return false }
+        defer { try? output.close() }
         let expectedBytes = getExpectedInstallerSize(version: config.update.targetVersion)
-        cliLog("[Install] Expected installer size: \(expectedBytes > 0 ? "\(expectedBytes / 1_073_741_824) GB" : "unknown")")
-
         let process = Process()
-        process.launchPath          = "/bin/bash"
-        process.arguments           = [wrapperPath]
-        process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = output
         do { try process.run() }
-        catch { cliLog("[Install] Cannot launch \(tool): \(error)"); return false }
+        catch { cliLog("[Install] Cannot launch \(tool)"); return false }
 
         var lastProgress    = 0.0
         var processedLines  = 0
@@ -527,12 +408,8 @@ echo "DONE" > "\(doneFile)"
         var lastFileBytes   = Int64(0)
         var plateauTicks    = 0              // tracks how long progress is near the cap
 
-        while process.isRunning || !FileManager.default.fileExists(atPath: doneFile) {
+        while process.isRunning {
             Thread.sleep(forTimeInterval: 3.0)
-            ensureActiveInstallUI(state: "downloading",
-                                  uiPath: uiPath,
-                                  cfgPath: cfgPath,
-                                  extraArgs: "--download-progress 0 --download-subtitle \"Preparing download…\"")
 
             // Parse stdout lines — used for mist-cli (outputs real %)
             // For softwareupdate we skip since its % is an internal stage counter
@@ -548,7 +425,7 @@ echo "DONE" > "\(doneFile)"
                     lastProgress = progress
                     let subtitle = progressSubtitle(progress: progress, line: line, tool: tool)
                     try? "\(String(format: "%.3f", progress))\n\(subtitle)"
-                        .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                        .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
                 }
             }
 
@@ -596,7 +473,7 @@ echo "DONE" > "\(doneFile)"
                     }
 
                     try? "\(String(format: "%.3f", lastProgress))\n\(subtitle)"
-                        .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                        .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
                     cliLog("[Install] Progress: \(pct)% (\(mbDone) MB / \(dynamicExpected / 1_048_576) MB expected)")
 
                 } else if lastProgress < 0.01 {
@@ -604,24 +481,18 @@ echo "DONE" > "\(doneFile)"
                     let pulseVal = 0.02 + 0.02 * Double(pulseTick % 8)
                     let dots = String(repeating: ".", count: (pulseTick % 3) + 1)
                     try? "\(String(format: "%.3f", pulseVal))\nConnecting to Apple servers\(dots)"
-                        .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                        .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
                 } else {
                     let pct = String(format: "%.1f", lastProgress * 100)
                     try? "\(String(format: "%.3f", lastProgress))\nDownloading macOS… \(pct)%"
-                        .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                        .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
                 }
             }
 
-            if FileManager.default.fileExists(atPath: doneFile) { break }
         }
         process.waitUntilExit()
-        shell("rm -f \"\(wrapperPath)\" \"\(doneFile)\" 2>/dev/null; true")
-
-        let finalLog = (try? String(contentsOfFile: logFile, encoding: .utf8)) ?? ""
-        let success  = finalLog.contains("EXIT_CODE:0")
-        if !success {
-            cliLog("[Install] \(tool) FAILED. Last lines:\n\(finalLog.components(separatedBy: "\n").suffix(10).joined(separator: "\n"))")
-        }
+        let success = process.terminationStatus == 0
+        if !success { cliLog("[Install] \(tool) failed with exit status \(process.terminationStatus)") }
         return success
     }
 
@@ -771,281 +642,92 @@ echo "DONE" > "\(doneFile)"
     private func finishDownloadUI(success: Bool = true) {
         if success {
             try? "1.0\nDownload complete!"
-                .write(toFile: "/tmp/push-download-progress", atomically: true, encoding: .utf8)
+                .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
             Thread.sleep(forTimeInterval: 2.5)
         }
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
-        try? FileManager.default.removeItem(atPath: "/tmp/push-download-progress")
+        try? FileManager.default.removeItem(atPath: "/private/var/run/com.push/download-progress")
     }
 
     // MARK: - startosinstall
 
     private func runStartOSInstall(installer: String, creds: InstallCredentials?,
                                     uiPath: String, cfgPath: String) {
-        let startosinstall = "\(installer)/Contents/Resources/startosinstall"
-        guard FileManager.default.fileExists(atPath: startosinstall) else {
-            showError("startosinstall not found inside \(installer).",
-                      uiPath: uiPath, cfgPath: cfgPath)
-            exit(1)
-        }
-
-        // Validate the installer with Gatekeeper before prompting for password.
-        // Catches corrupt downloads before we commit to the install.
-        cliLog("[Install] Validating installer with Gatekeeper...")
-        let (usageOut, usageStatus) = shell("\"\(startosinstall)\" --usage 2>&1")
-        guard usageStatus == 0 || usageOut.lowercased().contains("usage: startosinstall") else {
-            cliLog("[Install] Installer validation failed: \(usageOut)")
-            showError("The macOS installer appears to be corrupt. It will be removed so it can be re-downloaded next time.",
-                      uiPath: uiPath, cfgPath: cfgPath)
-            // Remove corrupt installer so next run re-downloads
-            shell("rm -rf \"\(installer)\" 2>/dev/null; true")
-            exit(1)
-        }
-        cliLog("[Install] Installer validated OK")
-
-        // --forcequitapps forces open apps to quit so the install isn't stalled.
-        var installArgs = ["--agreetolicense", "--forcequitapps"]
-        var stdinText: String? = nil
-        // Apple Silicon requires --user + --stdinpass together; without --user the
-        // password is silently ignored and startosinstall exits without installing.
-        // The account must be Secure-Token-enabled — may be a separate admin (LAPS,
-        // config-file) and not the console user.
-        if let c = creds {
-            cliLog("[Install] Passing credentials for admin user: \(c.username)")
-            installArgs += ["--user", c.username, "--stdinpass"]
-            stdinText = c.password + "\n"
-        } else if isAppleSilicon() && config.update.requirePasswordOnAppleSilicon {
-            cliLog("[Install] Warning: no credentials resolved — startosinstall will likely fail on Apple Silicon")
-        }
-
-        var state = loadState(); state.installStarted = true; try? saveState(state)
-        cliLog("[Install] Running startosinstall — machine will reboot when done")
-
-        // Write initial value immediately so UI bar starts near 0, not at fake 55%
-        let progressFile = "/tmp/push-install-progress"
-        try? "0.01\nPreparing macOS upgrade…"
-            .write(toFile: progressFile, atomically: true, encoding: .utf8)
-
-        // Combine time-based simulated progress + real startosinstall "Preparing: X%".
-        // startosinstall stalls at ~1% for most of the run so we simulate smooth
-        // progress over 15 min and use real data when it exceeds the simulation.
-        let logFile        = "/tmp/push-startosinstall.log"
-        let doneFlag       = "/tmp/push-startosinstall-done.flag"
-        let expectedSecs   = 15.0 * 60.0  // 15 minutes expected
-        let startTime      = Date()
-
-        shell("rm -f \"\(logFile)\" \"\(doneFlag)\" 2>/dev/null; true")
-
-        let proc: Process
-        do {
-            proc = try startStreamingProcess(executable: startosinstall,
-                                             arguments: installArgs,
-                                             stdinText: stdinText,
-                                             logFile: logFile)
-        } catch {
-            cliLog("[Install] Cannot launch startosinstall: \(error)")
-            showError("Could not start the macOS installer. Please try again or contact IT support.",
-                      uiPath: uiPath, cfgPath: cfgPath)
+        guard InstallerValidation.matches(installer, target: config.update.targetVersion) else {
+            showError("Installer product version could not be verified for the requested macOS target.", uiPath: uiPath, cfgPath: cfgPath)
             return
         }
+        // Assess the app before executing any code it contains; --usage is not a signature check.
+        let (_, trusted) = runDirect("/usr/sbin/spctl", ["--assess", "--type", "execute", installer])
+        guard trusted == 0 else {
+            showError("The macOS installer did not pass Gatekeeper verification.", uiPath: uiPath, cfgPath: cfgPath)
+            return
+        }
+        var arguments = ["--agreetolicense", "--forcequitapps"]
+        if let creds { arguments += ["--user", creds.username, "--stdinpass"] }
+        performInstaller(executable: installer + "/Contents/Resources/startosinstall", arguments: arguments,
+                         creds: creds, uiPath: uiPath, cfgPath: cfgPath)
+    }
 
-        var lastPct = 0.0
-        while proc.isRunning {
-            Thread.sleep(forTimeInterval: 3.0)
-            ensureActiveInstallUI(state: "installing",
-                                  uiPath: uiPath,
-                                  cfgPath: cfgPath)
+    private func credentialsAreUsable(_ creds: InstallCredentials?, uiPath: String, cfgPath: String) -> Bool {
+        guard isAppleSilicon() else { return true }
+        guard let creds, !creds.username.isEmpty, !creds.password.isEmpty,
+              creds.password.utf8.count <= 4096, !creds.password.contains("\n"), !creds.password.contains("\r"),
+              verifyLocalPassword(account: creds.username, password: creds.password) else {
+            showError("Valid authorization is required before installing macOS.", uiPath: uiPath, cfgPath: cfgPath); return false
+        }
+        let (status, code) = runDirect("/usr/sbin/sysadminctl", ["-secureTokenStatus", creds.username])
+        guard code == 0, status.lowercased().contains("enabled") else {
+            showError("The authorizing account needs Secure Token. Please contact IT.", uiPath: uiPath, cfgPath: cfgPath); return false
+        }
+        return true
+    }
 
-            // Time-based simulation: 0→92% over 15 min, eased so it feels natural
-            let elapsed  = Date().timeIntervalSince(startTime)
-            let timePct  = min(0.92, elapsed / expectedSecs)
-
-            // Real progress from startosinstall output
-            var realPct = 0.0
-            if let raw = try? String(contentsOfFile: logFile, encoding: .utf8) {
-                for line in raw.components(separatedBy: CharacterSet(charactersIn: "\r\n")) {
-                    let t = line.trimmingCharacters(in: .whitespaces).lowercased()
-                    if (t.contains("preparing") || t.contains("percent")) && t.contains("%") {
-                        if let regex = try? NSRegularExpression(pattern: #"(\d+\.?\d*)\s*%"#),
-                           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                           let r = Range(match.range(at: 1), in: line),
-                           let pct = Double(String(line[r])) {
-                            realPct = max(realPct, min(0.99, pct / 100.0))
-                        }
-                    }
-                    if !line.trimmingCharacters(in: .whitespaces).isEmpty {
-                        cliLog("[startosinstall] \(line)")
-                    }
+    private func performInstaller(executable: String, arguments: [String], creds: InstallCredentials?,
+                                  uiPath: String, cfgPath: String) {
+        var state = loadState()
+        state.beginInstallation(target: config.update.targetVersion, running: currentMacOSVersion(), boot: currentBootTimestamp())
+        do { try saveState(state) } catch {
+            showError("Could not save installation state. Installation has not started.", uiPath: uiPath, cfgPath: cfgPath); return
+        }
+        let progressFile = "/private/var/run/com.push/install-progress"
+        defer { try? FileManager.default.removeItem(atPath: progressFile) }
+        var pendingOutput = ""
+        let (_, exitCode) = runDirect(executable, arguments, input: creds.map { $0.password + "\n" }) { chunk in
+            pendingOutput += chunk.replacingOccurrences(of: "\r", with: "\n")
+            while let newline = pendingOutput.firstIndex(of: "\n") {
+                let line = String(pendingOutput[..<newline])
+                pendingOutput.removeSubrange(...newline)
+                // Never log raw installer output, which may echo authorization details.
+                if let progress = parseNativeProgress(line) {
+                    try? "\(String(format: "%.3f", min(0.99, progress)))\nPreparing macOS installation…"
+                        .write(toFile: progressFile, atomically: true, encoding: .utf8)
                 }
             }
-
-            // Use highest of: simulated time, real data, or last known value
-            let progress = max(timePct, realPct, lastPct)
-            lastPct = progress
-
-            // Countdown subtitle
-            let minsLeft = max(1, Int(ceil((expectedSecs - elapsed) / 60.0)))
-            let subtitle: String
-            if elapsed < expectedSecs {
-                subtitle = "Your Mac will restart in ~\(minsLeft) minute\(minsLeft == 1 ? "" : "s")"
-            } else {
-                subtitle = "Almost done — do not shut down your Mac"
-            }
-
-            try? "\(String(format: "%.3f", lastPct))\n\(subtitle)"
-                .write(toFile: progressFile, atomically: true, encoding: .utf8)
+            if pendingOutput.count > 16384 { pendingOutput = String(pendingOutput.suffix(16384)) }
         }
-        proc.waitUntilExit()
-        appendLine("EXIT_CODE:\(proc.terminationStatus)", to: logFile)
-        shell("rm -f \"\(doneFlag)\" 2>/dev/null; true")
-        try? FileManager.default.removeItem(atPath: progressFile)
-
-        // Check exit code — if startosinstall failed, show error instead of freezing
-        let finalLog = (try? String(contentsOfFile: logFile, encoding: .utf8)) ?? ""
-        let succeeded = finalLog.contains("EXIT_CODE:0")
-            || finalLog.lowercased().contains("install finished successfully")
-            || finalLog.lowercased().contains("preparing reboot")
-
-        if succeeded {
-            state.installCompleted = true; try? saveState(state)
-            NotificationManager(config: config).notifyInstallComplete(
-                version: config.update.targetVersion,
-                previousVersion: currentMacOSVersion()
-            )
-            // Trigger Jamf recon post-install so EA updates immediately after reboot
-            if !config.jamf.binaryPath.isEmpty,
-               FileManager.default.fileExists(atPath: config.jamf.binaryPath) {
-                cliLog("[Install] Triggering jamf recon post-install")
-                shell("\"\(config.jamf.binaryPath)\" recon 2>/dev/null")
-            }
-            // Compliance wallpaper — once compliant, only replace PUSH's own
-            // non-compliant image. If the user already picked a different
-            // wallpaper, preserve it.
-            WallpaperManager(config: config).applyCompliantIfReplacingNonCompliant()
+        if exitCode == 0 {
+            cliLog("[Install] Staging succeeded; awaiting post-reboot verification")
         } else {
-            cliLog("[Install] startosinstall may have failed. Log tail:\n\(finalLog.components(separatedBy: "\n").suffix(15).joined(separator: "\n"))")
-            shell("pkill -x push-ui 2>/dev/null || true")
-            Thread.sleep(forTimeInterval: 0.3)
-
-            // If we used a user-saved password and the install failed, the saved
-            // credential may be stale (e.g. user changed password but cached version
-            // still validates against dscl, OR Secure Token was revoked). Delete it
-            // so the next attempt re-prompts instead of looping the same failure.
-            if let c = creds, c.fromSavedUserPassword {
-                cliLog("[Install] startosinstall rejected saved user password — clearing keychain entry for \(c.username)")
-                deleteUserPasswordFromLoginKeychain(account: c.username)
-            }
-
-            // Parse a useful error from the log
-            var reason = "Installation failed. Please try again or contact IT support."
-            for line in finalLog.components(separatedBy: "\n").reversed() {
-                let t = line.trimmingCharacters(in: .whitespaces).lowercased()
-                if t.contains("error") || t.contains("fail") || t.contains("denied") {
-                    reason = line.trimmingCharacters(in: .whitespaces)
-                    break
-                }
-            }
-            showError(reason, uiPath: uiPath, cfgPath: cfgPath)
-            // Reset installStarted so user can try again
-            state.installStarted = false; try? saveState(state)
+            state.failInstallation()
+            do { try saveState(state) } catch { cliLog("[Install] Failed to save retry state") }
+            cliLog("[Install] Installer failed with exit status \(exitCode)")
+            showError("macOS installation failed (exit \(exitCode)). Please retry or contact IT.", uiPath: uiPath, cfgPath: cfgPath)
         }
-        shell("rm -f \"\(logFile)\" 2>/dev/null; true")
     }
 
     // MARK: - Helpers
-
-    private var forcedUIFlag: String {
-        skipInitialPrompt ? " --forced" : ""
-    }
-
-    private func ensureActiveInstallUI(state: String,
-                                       uiPath: String,
-                                       cfgPath: String,
-                                       extraArgs: String = "") {
-        guard skipInitialPrompt else { return }
-        guard FileManager.default.fileExists(atPath: uiPath) else { return }
-
-        drainUITamperEvents()
-
-        let (pids, _) = shell("pgrep -x push-ui 2>/dev/null")
-        if !pids.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return
-        }
-
-        cliLog("[Tamper] Forced \(state) UI was not running — possible force quit or killed popup; relaunching while update continues")
-        var cmd = "\"\(uiPath)\" --state \(state) --config \"\(cfgPath)\"\(forcedUIFlag)"
-        if !extraArgs.isEmpty {
-            cmd += " \(extraArgs)"
-        }
-        launchUIAsUser(cmd)
-    }
-
-    private func drainUITamperEvents() {
-        let path = "/tmp/push-ui-tamper-events.log"
-        guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
-              !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
-
-        for line in raw.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            cliLog("[Tamper] \(trimmed)")
-        }
-        try? FileManager.default.removeItem(atPath: path)
-    }
-
     private func findExistingInstaller() -> String? {
-        for dir in ["\(managedBase)/downloads", "/Applications"] {
-            let (f, _) = shell("find \"\(dir)\" -maxdepth 3 -name 'Install*.app' -type d 2>/dev/null | grep -i 'macos\\|os x' | head -1")
-            if !f.isEmpty && FileManager.default.fileExists(atPath: f) { return f }
-        }
-        return nil
+        InstallerValidation.find(in: [managedBase + "/downloads", "/Applications"], target: config.update.targetVersion)
     }
-
     private func findInstallerInApplications() -> String? {
-        let (a, _) = shell("find /Applications -maxdepth 2 -name 'Install macOS*.app' -type d 2>/dev/null | head -1")
-        if !a.isEmpty { return a }
-        let (b, _) = shell("find /Applications -maxdepth 2 -name 'Install*.app' -type d 2>/dev/null | grep -i macos | head -1")
-        return b.isEmpty ? nil : b
+        InstallerValidation.find(in: ["/Applications"], target: config.update.targetVersion)
     }
 
     private func findMistCLI() -> String? {
         ["/usr/local/bin/mist", "/opt/homebrew/bin/mist"]
             .first { FileManager.default.fileExists(atPath: $0) }
-    }
-
-    private func promptPassword(uiPath: String, cfgPath: String) -> String? {
-        let forcedFlag = skipInitialPrompt ? " --forced" : ""
-        var attempts = 0
-        let maxAttempts = skipInitialPrompt ? 99 : 1  // retry indefinitely during forced install
-
-        while attempts < maxAttempts {
-            attempts += 1
-            // Kill existing instance and wait fully — open -a reuses running app
-            // and ignores new args, so we must ensure a fresh launch
-            shell("pkill -x push-ui 2>/dev/null || true")
-            Thread.sleep(forTimeInterval: skipInitialPrompt ? 1.0 : 0.3)
-            let status = runUIBlocking("\"\(uiPath)\" --state passwordPrompt --config \"\(cfgPath)\"\(forcedFlag)")
-
-            if status == 0 {
-                guard let user = consoleUser() else { return nil }
-                if let pwd = consumePasswordHandoff(for: user),
-                   validateUserPassword(account: user.name, password: pwd) {
-                    _ = storeSystemKeychainPassword(account: user.name, password: pwd)
-                    return pwd
-                }
-                cliLog("[Install] Password prompt succeeded but handoff was not retrievable")
-            } else if skipInitialPrompt {
-                // During forced install — user tried to dismiss, show again
-                cliLog("[Install] Password prompt dismissed during forced install — retrying (attempt \(attempts))")
-                Thread.sleep(forTimeInterval: 1.0)
-                continue
-            } else {
-                return nil
-            }
-        }
-        return nil
     }
 
     /// Unified credential resolution for every install path.
@@ -1054,7 +736,7 @@ echo "DONE" > "\(doneFile)"
     /// carrying both the admin username (which may differ from console user when
     /// LAPS or a separate admin is used) and the password.
     ///
-    /// LAPS fetch failures fall back through keychain → config → prompt instead
+    /// LAPS fetch failures fall back through keychain → config; otherwise defer to IT instead
     /// of aborting — a transient Jamf outage should not brick the install.
     private func resolveInstallCredentials(uiPath: String, cfgPath: String,
                                            skipInitialPrompt: Bool,
@@ -1069,40 +751,13 @@ echo "DONE" > "\(doneFile)"
             cliLog("[Install] Bootstrap Token branch hit from install path — unexpected")
             return nil
 
-        case .userSavedPassword:
-            // Read user's saved password from their login keychain. Validate
-            // before use — if password expired/changed, delete it and fall
-            // through to prompt so the user can re-authorize.
-            guard let consoleUser = consoleUser()?.name,
-                  let pwd = readUserPasswordFromLoginKeychain(account: consoleUser),
-                  !pwd.isEmpty
-            else {
-                cliLog("[Install] User saved password not retrievable (keychain locked or no console user) — falling back")
-                return resolveInstallCredentialsFallback(uiPath: uiPath, cfgPath: cfgPath,
-                                                         skipInitialPrompt: skipInitialPrompt)
-            }
-            if validateUserPassword(account: consoleUser, password: pwd) {
-                if storeSystemKeychainPassword(account: consoleUser, password: pwd) {
-                    deleteUserPasswordFromLoginKeychain(account: consoleUser)
-                    cliLog("[Install] Migrated saved login-keychain password to System Keychain for \(consoleUser)")
-                }
-                cliLog("[Install] Using saved login password for \(consoleUser)")
-                return InstallCredentials(username: consoleUser, password: pwd,
-                                          fromSavedUserPassword: true)
-            } else {
-                cliLog("[Install] Saved password no longer valid for \(consoleUser) — deleting and re-prompting")
-                deleteUserPasswordFromLoginKeychain(account: consoleUser)
-                return resolveInstallCredentialsFallback(uiPath: uiPath, cfgPath: cfgPath,
-                                                         skipInitialPrompt: skipInitialPrompt)
-            }
-
         case .laps:
             do {
                 let result = try JamfLAPSClient(config: config).fetchPassword()
                 cliLog("[Install] LAPS fetch succeeded for account: \(result.username)")
                 return InstallCredentials(username: result.username, password: result.password)
             } catch {
-                cliLog("[Install] LAPS fetch failed: \(error) — falling back to keychain/config/prompt")
+                cliLog("[Install] LAPS fetch failed: \(error) — falling back to keychain/config")
                 return resolveInstallCredentialsFallback(uiPath: uiPath, cfgPath: cfgPath,
                                                          skipInitialPrompt: skipInitialPrompt)
             }
@@ -1122,112 +777,38 @@ echo "DONE" > "\(doneFile)"
             cliLog("[Install] Using config file password for account: \(account) (plain text — consider keychain or LAPS)")
             return InstallCredentials(username: account, password: config.auth.localPassword)
 
-        case .prompt:
-            guard let pwd = promptPassword(uiPath: uiPath, cfgPath: cfgPath) else {
-                cliLog("[Install] Password cancelled (\(contextLabel))")
-                if skipInitialPrompt {
-                    cliLog("[Install] Forced install — retrying password prompt")
-                    if let retry = promptPassword(uiPath: uiPath, cfgPath: cfgPath) {
-                        let account = credentialAccountName()
-                        return InstallCredentials(username: account, password: retry)
-                    }
-                }
-                exit(2)
-            }
-            let account = credentialAccountName()
-            return InstallCredentials(username: account, password: pwd)
+        case .unavailable:
+            cliLog("[Install] No unattended authorization is available; leaving installation unstarted for IT")
+            return nil
         }
     }
 
-    /// Runs the remaining chain (keychain → config → prompt) when LAPS fails.
+    /// Runs the remaining chain (keychain → config; otherwise defer to IT) when LAPS fails.
     private func resolveInstallCredentialsFallback(uiPath: String, cfgPath: String,
                                                     skipInitialPrompt: Bool) -> InstallCredentials? {
         let account = credentialAccountName()
-        if let pwd = keychainPassword(), !pwd.isEmpty {
+        if !account.isEmpty, let pwd = keychainPassword(), !pwd.isEmpty {
             cliLog("[Install] Fallback: using System Keychain password for \(account)")
             return InstallCredentials(username: account, password: pwd)
         }
-        if !config.auth.localPassword.isEmpty {
+        if !account.isEmpty && !config.auth.localPassword.isEmpty {
             cliLog("[Install] Fallback: using config file password for \(account)")
             return InstallCredentials(username: account, password: config.auth.localPassword)
         }
-        cliLog("[Install] Fallback: no stored credentials — prompting user")
-        if let pwd = promptPassword(uiPath: uiPath, cfgPath: cfgPath) {
-            return InstallCredentials(username: account, password: pwd)
-        }
-        if skipInitialPrompt {
-            if let retry = promptPassword(uiPath: uiPath, cfgPath: cfgPath) {
-                return InstallCredentials(username: account, password: retry)
-            }
-        }
+        cliLog("[Install] No managed credentials are available; user password prompts are disabled")
         return nil
     }
 
     /// Picks the admin account name for non-LAPS paths.
-    /// Prefers auth.localAccount, else falls back to the console user.
+    /// Requires an IT-configured account; never assumes the console user.
     private func credentialAccountName() -> String {
         if !config.auth.localAccount.isEmpty { return config.auth.localAccount }
-        return consoleUser()?.name ?? ""
+        return ""
     }
 
     private func showError(_ message: String, uiPath: String, cfgPath: String) {
         cliLog("[Install] Error: \(message)")
         shell("pkill -x push-ui 2>/dev/null || true"); Thread.sleep(forTimeInterval: 0.3)
-        launchUIAsUser("\"\(uiPath)\" --state error --config \"\(cfgPath)\" --error \"\(message)\"")
-    }
-
-    private func startStreamingProcess(executable: String,
-                                       arguments: [String],
-                                       stdinText: String?,
-                                       logFile: String) throws -> Process {
-        FileManager.default.createFile(atPath: logFile, contents: nil)
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-        outputPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
-            appendLine(chunk.replacingOccurrences(of: "\r", with: "\n"), to: logFile)
-        }
-
-        let inputPipe: Pipe?
-        if stdinText != nil {
-            let pipe = Pipe()
-            process.standardInput = pipe
-            inputPipe = pipe
-        } else {
-            inputPipe = nil
-        }
-
-        try process.run()
-
-        if let stdinText, let inputPipe {
-            inputPipe.fileHandleForWriting.write(Data(stdinText.utf8))
-            try? inputPipe.fileHandleForWriting.close()
-        }
-
-        return process
-    }
-}
-
-private func appendLine(_ text: String, to path: String) {
-    guard let data = text.hasSuffix("\n")
-            ? text.data(using: .utf8)
-            : "\(text)\n".data(using: .utf8)
-    else { return }
-
-    if FileManager.default.fileExists(atPath: path),
-       let handle = FileHandle(forWritingAtPath: path) {
-        handle.seekToEndOfFile()
-        handle.write(data)
-        try? handle.close()
-    } else {
-        FileManager.default.createFile(atPath: path, contents: data)
+        launchUIAsUser("\"\(uiPath)\" --state error --config \"\(cfgPath)\" --error \(shellArgument(message))")
     }
 }

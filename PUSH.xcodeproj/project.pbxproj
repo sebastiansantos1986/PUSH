@@ -7,12 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        UHEALTH1 /* RuntimeHealth.swift in Sources */ = {isa = PBXBuildFile; fileRef = FHEALTH1 /* RuntimeHealth.swift */; };
+        UENT001 /* EntraNudge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FENT001 /* EntraNudge.swift */; };
+        UAPP001 /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAPP001 /* AppUpdates.swift */; };
+        IS01 = {isa = PBXBuildFile; fileRef = IS00; };
+        SS01 = {isa = PBXBuildFile; fileRef = SS00; };
+        SS02 = {isa = PBXBuildFile; fileRef = SS00; };
+        SS03 = {isa = PBXBuildFile; fileRef = SS00; };
 		D071844E2FA2875900AF3482 /* JamfCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D071844C2FA2875900AF3482 /* JamfCommand.swift */; };
 		D071844F2FA2875900AF3482 /* JamfLAPSClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D071844D2FA2875900AF3482 /* JamfLAPSClient.swift */; };
 		D0F102F52FA40480007894F8 /* UptimeCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F102F42FA40480007894F8 /* UptimeCheck.swift */; };
 		D0F102F72FA40504007894F8 /* AutoCheckCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */; };
-		D0F459B02FA90C8900F0EB18 /* WallpaperManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */; };
-		D0F459B12FA90C8900F0EB18 /* WallpaperCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */; };
 		D0F7DEE52FA2B7040098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */; };
 		D0F7DEE62FA2B7040098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */; };
 		D0F7DEE82FA2B7140098C495 /* UserPasswordKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */; };
@@ -51,12 +56,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        FHEALTH1 /* RuntimeHealth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeHealth.swift; sourceTree = "<group>"; };
+        FENT001 /* EntraNudge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntraNudge.swift; sourceTree = "<group>"; };
+        FAPP001 /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
+        IS00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallSafety.swift; sourceTree = "<group>"; };
+        SS00 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/SecureSupport.swift; sourceTree = SOURCE_ROOT; };
 		D071844C2FA2875900AF3482 /* JamfCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JamfCommand.swift; sourceTree = "<group>"; };
 		D071844D2FA2875900AF3482 /* JamfLAPSClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JamfLAPSClient.swift; sourceTree = "<group>"; };
 		D0F102F42FA40480007894F8 /* UptimeCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UptimeCheck.swift; sourceTree = "<group>"; };
 		D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoCheckCommand.swift; sourceTree = "<group>"; };
-		D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperCommand.swift; sourceTree = "<group>"; };
-		D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperManager.swift; sourceTree = "<group>"; };
 		D0F7DEE42FA2B7040098C495 /* UserPasswordKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPasswordKeychain.swift; sourceTree = "<group>"; };
 		D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPasswordKeychain.swift; sourceTree = "<group>"; };
 		F101 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -119,8 +127,7 @@
 		GRP_CLI /* push-cli */ = {
 			isa = PBXGroup;
 			children = (
-				D0F459AE2FA90C8900F0EB18 /* WallpaperCommand.swift */,
-				D0F459AF2FA90C8900F0EB18 /* WallpaperManager.swift */,
+                IS00,
 				D0F102F62FA40504007894F8 /* AutoCheckCommand.swift */,
 				D0F102F42FA40480007894F8 /* UptimeCheck.swift */,
 				D0F7DEE72FA2B7140098C495 /* UserPasswordKeychain.swift */,
@@ -144,6 +151,9 @@
 				F216 /* PlatformInfo.swift */,
 				F217 /* DownloadCommand.swift */,
 				F218 /* ExtrasCommand.swift */,
+                FAPP001 /* AppUpdates.swift */,
+                FENT001 /* EntraNudge.swift */,
+                FHEALTH1 /* RuntimeHealth.swift */,
 				F219 /* MDMCommand.swift */,
 				F220 /* AuthCommand.swift */,
 			);
@@ -171,6 +181,7 @@
 		GRP_ROOT = {
 			isa = PBXGroup;
 			children = (
+                SS00,
 				GRP_UI /* push-ui */,
 				GRP_CLI /* push-cli */,
 				GRP_PREVIEW /* PreviewHost */,
@@ -218,6 +229,7 @@
 			buildPhases = (
 				SRC002 /* Sources */,
 				PH02 /* Frameworks */,
+				D0E8FFE6309D19440063ACB4 /* PUSH — Developer Attribution Verification */,
 			);
 			buildRules = (
 			);
@@ -304,11 +316,34 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		D0E8FFE6309D19440063ACB4 /* PUSH — Developer Attribution Verification */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "PUSH — Developer Attribution Verification";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\n# PUSH — Developer Attribution Verification\n# Developer: Sebastian Santos\n# Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS\n\nSCRIPT=\"${SRCROOT}/verify-push-attribution.sh\"\n\nif [ ! -f \"$SCRIPT\" ]; then\n    echo \"error: PUSH attribution verification script not found: $SCRIPT\"\n    exit 1\nfi\n\n/bin/bash \"$SCRIPT\"\n\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		SRC001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                SS01,
 				U101 /* main.swift in Sources */,
 				U102 /* UIConfig.swift in Sources */,
 				U103 /* UIState.swift in Sources */,
@@ -322,10 +357,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                IS01,
+                SS02,
 				U201 /* main.swift in Sources */,
 				U202 /* CLIHelpers.swift in Sources */,
-				D0F459B02FA90C8900F0EB18 /* WallpaperManager.swift in Sources */,
-				D0F459B12FA90C8900F0EB18 /* WallpaperCommand.swift in Sources */,
 				U203 /* CLIConfig.swift in Sources */,
 				U204 /* AutoCheckCommand.swift in Sources */,
 				U205 /* StatusCommand.swift in Sources */,
@@ -345,9 +380,11 @@
 				U216 /* PlatformInfo.swift in Sources */,
 				U217 /* DownloadCommand.swift in Sources */,
 				U218 /* ExtrasCommand.swift in Sources */,
+                UAPP001 /* AppUpdates.swift in Sources */,
+                UENT001 /* EntraNudge.swift in Sources */,
+                UHEALTH1 /* RuntimeHealth.swift in Sources */,
 				U219 /* MDMCommand.swift in Sources */,
 				D0F7DEE82FA2B7140098C495 /* UserPasswordKeychain.swift in Sources */,
-				D0F102F72FA40504007894F8 /* AutoCheckCommand.swift in Sources */,
 				U220 /* AuthCommand.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -356,6 +393,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                SS03,
 				U301 /* PreviewApp.swift in Sources */,
 				U302 /* UIConfig.swift in Sources */,
 				U303 /* UIState.swift in Sources */,
@@ -372,6 +410,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
 				SWIFT_VERSION = 5.0;
@@ -382,6 +423,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
 				SWIFT_VERSION = 5.0;
@@ -392,6 +436,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				OTHER_SWIFT_FLAGS = "-framework IOKit";
@@ -405,6 +452,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				OTHER_SWIFT_FLAGS = "-framework IOKit";
@@ -440,6 +490,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
 				INFOPLIST_KEY_LSUIElement = YES;
@@ -455,6 +508,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+                MARKETING_VERSION = 1.6.0;
+                CURRENT_PROJECT_VERSION = 160;
+                INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
 				INFOPLIST_KEY_LSUIElement = YES;

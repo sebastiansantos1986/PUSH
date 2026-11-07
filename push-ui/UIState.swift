@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: UIState.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // UIState.swift — Popup states, exit codes, and shared runtime context for PUSH
 
 import Foundation
@@ -7,6 +17,8 @@ import SwiftUI
 
 enum UIState: String {
     case toast          = "toast"
+    case appUpdates     = "appUpdates"
+    case entraRegistration = "entraRegistration"
     case softNudge      = "softNudge"
     case hardBlock      = "hardBlock"
     case preflightPower = "preflightPower"
@@ -27,6 +39,8 @@ enum UIState: String {
     var windowTitle: String {
         switch self {
         case .toast:          return "Software Update"
+        case .appUpdates:     return "Application Updates"
+        case .entraRegistration: return "Microsoft Entra Registration"
         case .softNudge:      return "Software Update Required"
         case .hardBlock:      return "Immediate Update Required"
         case .preflightPower: return "Power Required"
@@ -51,12 +65,16 @@ enum PushExitCode: Int32 {
     case dismiss         = 2   // User dismissed (X / ESC / Skip)
     case scheduledDefer  = 3   // User picked a specific future date/time (no deferral cost)
     case powerTimeout    = 4   // Power preflight timed out — no charger connected
+    case toastTimeout    = 5   // Toast closed after its configured timeout
+    case contactSupport  = 6   // Support link opened by an explicit click
     case error           = 99
 }
 
 // MARK: - Shared runtime context
 
 class UIContext: ObservableObject {
+    let isPreview = false
+    var isManualTest = false
     let config:        UIConfig
     let state:         UIState
     let deferralCount: Int
@@ -65,6 +83,8 @@ class UIContext: ObservableObject {
     @Published var downloadProgress: Double = 0
     @Published var downloadSubtitle: String = "Preparing download…"
 
+    var entraNotice = EntraNotice.preview()
+    var appUpdates: [AppUpdateNotice] = AppUpdateNotice.examples
     var diskAvailableGB: Double = 8.5
     var diskRequiredGB:  Double = 25.0
     var errorMessage:    String = "An unexpected error occurred."
@@ -90,7 +110,9 @@ class UIContext: ObservableObject {
         max(0, config.update.maxDeferrals - deferralCount)
     }
 
-    func exit(_ code: PushExitCode) {
+    func noteAction(_ title: String) {}
+
+    func exit(_ code: PushExitCode, automatic: Bool = false) {
         Foundation.exit(code.rawValue)
     }
 }

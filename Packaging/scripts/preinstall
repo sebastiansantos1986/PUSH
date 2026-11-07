@@ -1,0 +1,65 @@
+#!/bin/bash
+# Developer: Sebastian Santos
+# Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+# Local verification installer: back up before replacing; leave scheduling paused.
+set -euo pipefail
+umask 077
+[[ "${3:-/}" == / ]] || { echo 'Install PUSH on the running startup disk only.' >&2; exit 1; }
+base=/Library/Management/PUSH
+plist=/Library/LaunchDaemons/com.push.autoupdate.plist
+entra_plist=/Library/LaunchDaemons/com.push.entra-registration.plist
+# Refuse to disturb a download or macOS installation already in progress.
+for name in startosinstall softwareupdate mist; do
+    if /usr/bin/pgrep -x "$name" >/dev/null; then
+        echo "PUSH installation stopped: $name is running. Retry after it finishes." >&2
+        exit 1
+    fi
+done
+for directory in /Library/Management "$base"; do
+    if [[ -e "$directory" || -L "$directory" ]]; then
+        [[ -d "$directory" && ! -L "$directory" && "$(/usr/bin/stat -f %u "$directory")" == 0 ]] || {
+            echo "Unsafe installation directory: $directory" >&2; exit 1;
+        }
+    fi
+done
+# Boot out the previous schedule before replacing binaries. Never bootstrap here.
+if /bin/launchctl print system/com.push.autoupdate >/dev/null 2>&1; then
+    /bin/launchctl bootout system/com.push.autoupdate
+fi
+if /bin/launchctl print system/com.push.entra-registration >/dev/null 2>&1; then
+    /bin/launchctl bootout system/com.push.entra-registration
+fi
+if /usr/bin/pgrep -x push-cli >/dev/null; then
+    echo 'A PUSH command is still running. Let it finish, then retry installation. Scheduling is paused.' >&2
+    exit 1
+fi
+backup_root=/Library/Management/PUSH-backups
+if [[ -e "$backup_root" || -L "$backup_root" ]]; then
+    [[ -d "$backup_root" && ! -L "$backup_root" && "$(/usr/bin/stat -f %u "$backup_root")" == 0 ]] || exit 1
+fi
+/bin/mkdir -p "$backup_root"
+/bin/chmod 700 "$backup_root"
+backup="$backup_root/$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
+/bin/mkdir "$backup"
+for item in push-cli push-ui.app config.yaml config.json state.json detections.json apps-state.json entra-state.json health; do
+    if [[ -e "$base/$item" || -L "$base/$item" ]]; then
+        /usr/bin/ditto "$base/$item" "$backup/$item"
+    fi
+done
+if [[ -e "$plist" || -L "$plist" ]]; then
+    /bin/cp -p "$plist" "$backup/com.push.autoupdate.plist"
+fi
+if [[ -e "$entra_plist" || -L "$entra_plist" ]]; then
+    /bin/cp -p "$entra_plist" "$backup/com.push.entra-registration.plist"
+    /bin/rm "$entra_plist"
+fi
+if [[ -e /usr/local/bin/push-cli || -L /usr/local/bin/push-cli ]]; then
+    /bin/cp -Pp /usr/local/bin/push-cli "$backup/usr-local-bin-push-cli"
+fi
+# Keep the old daemon plist in the backup so a reboot cannot restart it mid-test.
+if [[ -e "$plist" || -L "$plist" ]]; then /bin/rm "$plist"; fi
+/usr/bin/pkill -x push-ui 2>/dev/null || true
+/bin/mkdir -p "$base/logs" "$base/downloads"
+printf '%s\n' "$backup" > "$base/last-package-backup.txt"
+/bin/chmod 600 "$base/last-package-backup.txt"
+echo "Previous PUSH files backed up to $backup. Automatic scheduling is paused."

@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: JamfLAPSClient.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // JamfLAPSClient.swift — retrieve the managed local admin password from Jamf Pro
 //
 // Flow:
@@ -21,25 +31,10 @@ let kJamfLapsKeychainAccount  = "push_jamf_laps_secret"
 private let kJamfLapsKeychainFile = "/Library/Keychains/System.keychain"
 
 func jamfLapsKeychainSecret() -> String? {
-    let (out, status) = shell("""
-        security find-generic-password \
-          -s '\(kJamfLapsKeychainService)' \
-          -a '\(kJamfLapsKeychainAccount)' \
-          -w '\(kJamfLapsKeychainFile)' 2>/dev/null
-        """)
-    guard status == 0 else { return nil }
-    let v = out.trimmingCharacters(in: .whitespacesAndNewlines)
-    return v.isEmpty ? nil : v
+    PushKeychain.read(service: kJamfLapsKeychainService, account: kJamfLapsKeychainAccount, system: true)
 }
-
 func jamfLapsKeychainSecretExists() -> Bool {
-    let (_, status) = shell("""
-        security find-generic-password \
-          -s '\(kJamfLapsKeychainService)' \
-          -a '\(kJamfLapsKeychainAccount)' \
-          '\(kJamfLapsKeychainFile)' 2>/dev/null
-        """)
-    return status == 0
+    PushKeychain.exists(service: kJamfLapsKeychainService, account: kJamfLapsKeychainAccount, system: true)
 }
 
 // MARK: - Client
@@ -112,7 +107,7 @@ struct JamfLAPSClient {
 
         let (status, data) = httpRequest(method: "POST", url: urlStr, headers: headers, body: body)
         guard (200..<300).contains(status) else {
-            throw JamfLAPSError.httpStatus(status, String(data: data, encoding: .utf8) ?? "")
+            throw JamfLAPSError.httpStatus(status, "Response body withheld")
         }
 
         guard let obj   = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -134,7 +129,7 @@ struct JamfLAPSClient {
                                           headers: ["Authorization": "Bearer \(token)",
                                                     "Accept": "application/json"])
         guard (200..<300).contains(status) else {
-            throw JamfLAPSError.httpStatus(status, String(data: data, encoding: .utf8) ?? "")
+            throw JamfLAPSError.httpStatus(status, "Response body withheld")
         }
 
         guard let obj     = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -161,7 +156,7 @@ struct JamfLAPSClient {
                                           headers: ["Authorization": "Bearer \(token)",
                                                     "Accept": "application/json"])
         guard (200..<300).contains(status) else {
-            throw JamfLAPSError.httpStatus(status, String(data: data, encoding: .utf8) ?? "")
+            throw JamfLAPSError.httpStatus(status, "Response body withheld")
         }
 
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

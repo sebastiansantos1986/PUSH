@@ -1,0 +1,40 @@
+# PUSH — Developer: Sebastian Santos
+# Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+# Only used when no previous config exists. Local verification starts without automation.
+update:
+  targetVersion: ""
+  deadline: ""  # Explicit ISO 8601 override; blank uses the automatic deadline
+  silentInstallAfterDeadline: false
+  autoInstallAfterDeadline: false
+ui:
+  appName: "PUSH — Software Update"
+auto:
+  enabled: false
+  trackLatest: false
+  minorOnly: true
+  useMist: true
+  minorDeadlineDays: 7
+  majorDeadlineDays: 14
+  autoInstallNonSystemUpdates: false
+uptime:
+  enabled: false
+debug:
+  dryRun: true
+
+# Third-party apps are opt-in; no applications are installed by this package.
+apps:
+  enabled: false
+  approved: ""
+  autoUpdateClosed: false
+  notifyHourly: true
+  graceDays: 7
+
+# Registration reminders are opt-in and do not assess cloud compliance.
+entra:
+  enabled: false
+  policyID: "876"
+  startHour: 8
+  endHour: 18
+  weekdaysOnly: true
+  skipMeetings: true
+  reconOnRegistration: true

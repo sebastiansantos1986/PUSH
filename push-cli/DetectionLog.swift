@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: DetectionLog.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // DetectionLog.swift — tracks when each macOS version was first detected.
 // Stored at /Library/Management/PUSH/detections.json
 // Format: { "15.7.5": "2026-04-06T21:00:00Z" }

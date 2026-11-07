@@ -1,0 +1,125 @@
+PUSH Smart Policies — engine 1.3.0 / PUSH Admin 0.2.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+INSTALL
+Quit PUSH Admin, then open PUSH-Smart-Policies-0.2.0.pkg.
+The local test package is unsigned. It does not install a macOS upgrade, restart,
+launch PUSH, or activate monitoring. It backs up the previous engine, configuration,
+state, and discovery history under /Library/Management/PUSH-backups. Existing YAML,
+state, credentials, downloads, and logos are retained. The daemon remains paused.
+Your original Desktop Xcode project has not been overwritten.
+
+SET UP ONCE
+Open /Applications/PUSH Admin.app yourself.
+In Configuration > Automatic detection, choose:
+  Stay on current major: discover newer minor/patch releases in this major version.
+  Allow major upgrades: discover the latest compatible stable macOS release.
+These presets enable discovery in the draft and preserve your branding, deadline
+OVERRIDE, hours, dry-run setting, and install choices. No live configuration changes
+until you select Apply in Deployment.
+
+Set minor/major grace days, working hours, and install-after-deadline choices.
+Review the deadline override: an old expired override remains authoritative.
+For live operation, turn off debug.dryRun in the draft. Apply the configuration,
+then choose Enable hourly checks in Deployment. The confirmation shows the actual
+INSTALLED mode, deadline override, and automatic/silent installation settings.
+The first scheduled check runs immediately after YOU enable it.
+Administrative authorization is used for setup; no end-user password fallback is added.
+PUSH still needs managed authorization for unattended installations on supported hardware.
+
+YAML DEADLINE PRIORITY
+update.deadline is always the explicit administrator override. Example:
+
+update:
+  deadline: "2026-12-01T18:00:00Z"
+
+The override remains in effect even when discovery finds another target.
+Use an ISO 8601 timestamp with its time zone. Invalid overrides block update actions.
+Clear it to use the automatic grace period:
+
+update:
+  deadline: ""
+
+Automatic deadlines are recorded separately as update.automaticDeadline and
+update.automaticDeadlineTarget. They are anchored to the first successful detection
+of each target, remain stable across repeat checks, and never overwrite your override.
+Change grace days to affect newly discovered targets. A deadline for an old target
+is not applied to a different target. Generated values are maintained by PUSH.
+
+MINIMAL SET-ONCE DETECTION POLICY
+Add these fields in their EXISTING sections; do not create duplicate YAML sections.
+The companion writes the complete config for you.
+
+auto:
+  enabled: true
+  trackLatest: true
+  minorOnly: true
+  useMist: true
+  skipBetas: true
+  minorDeadlineDays: 7
+  majorDeadlineDays: 14
+
+Set minorOnly: false to permit compatible major upgrades.
+Existing configs without trackLatest retain the configured-target behavior until you
+opt in. The installer does not enable tracking or change your enforcement choices.
+
+FORCE COMMANDS — RUN THESE YOURSELF WHEN NEEDED
+/Library/Management/PUSH/push-cli --version
+  Expected: push-cli v1.3.0
+
+sudo /Library/Management/PUSH/push-cli check-now
+sudo /Library/Management/PUSH/push-cli force check
+  Equivalent: discover and save an eligible target and deadline now. No popup,
+  macOS download, or installation. Configured debug.dryRun still prevents actions.
+
+sudo /Library/Management/PUSH/push-cli notify-now
+sudo /Library/Management/PUSH/push-cli force notify
+  Equivalent: discover and show the appropriate update prompt now. Does not
+  automatically install merely because the deadline is past. If a user chooses
+  Install in this LIVE prompt, the real installation workflow is requested.
+
+sudo /Library/Management/PUSH/push-cli install-now
+sudo /Library/Management/PUSH/push-cli force install
+  Equivalent: REAL installation request for the eligible target. May download macOS
+  and lead to a restart. Retains authorization, compatibility, DDM, power, disk,
+  and competing-installer protections. A known staged install still needs reboot
+  verification; force does not clear that protection or bypass debug.dryRun.
+
+Append --dry-run to preview any of these commands with no update actions.
+The existing auto-check --force still ignores reminder times and alert hours; its
+normal deadline policy can invoke real installation. Use force check to inspect only.
+
+SAFE POPUP TESTING
+sudo /Library/Management/PUSH/push-cli popup toast
+sudo /Library/Management/PUSH/push-cli popup softNudge
+Manual popup commands simulate button responses and never start an upgrade.
+Use these for layout/button testing. They do not change production reminder state.
+
+DISCOVERY AND HEALTH
+Apple softwareupdate --list supplies applicable OS updates. Optional mist-cli supplies
+compatible full installers using list installer --compatible --export; these discovery
+commands do not download macOS. The engine looks for mist at /usr/local/bin/mist or
+/opt/homebrew/bin/mist. Missing Mist or catalog errors are reported in saved health.
+Read-only command syntax reference: https://github.com/ninxsoft/mist-cli#examples
+
+Tracking keeps checking even after the saved target is met. Discovery runs outside
+working hours; scheduled prompts wait for the alert window. Force notification bypasses
+reminder timing. Beta, version, major-release and compatibility policies still apply.
+
+The dashboard and CLI status show the saved target, effective deadline, last discovery,
+catalog issues, and recovery messages. Dashboard refresh reads local files only.
+Corrupt installation state blocks update actions instead of silently appearing idle.
+Legacy contradictory flags can recover when no installer is active. Modern staging
+metadata is retained until reboot verification; a restart below the intended version
+permits retry without falsely marking installation completed.
+
+VERIFICATION
+Engine: Release build for arm64 and x86_64; attribution verification passed.
+Companion: Release build for arm64 and x86_64.
+Offline regression checks cover policies, overrides, generated deadline stability,
+legacy recovery, active/staged protection, state corruption, catalog fixtures,
+configuration preservation, branding, layout bounds, and popup deadline parsing.
+No PUSH app, real update catalog query, credential operation, upgrade, or restart was
+launched during these offline checks. Live catalog and visual UI testing remain for
+you to perform after installation.

@@ -1,3 +1,13 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: ReportCommand.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // ReportCommand.swift — Compliance report, grace period, log rotation
 
 import Foundation
@@ -31,7 +41,7 @@ struct ReportCommand {
             "releaseType":     config.update.releaseType,
             "deferralCount":   state.deferralCount,
             "maxDeferrals":    config.update.maxDeferrals,
-            "deadline":        config.update.deadline,
+            "deadline":        config.effectiveDeadline,
             "pastDeadline":    config.isPastDeadline,
             "gracePeriodActive": graceActive,
             "gracePeriodUntil":  state.gracePeriodUntil.map {
@@ -54,7 +64,7 @@ struct ReportCommand {
 
         if formatCSV {
             let headers = "hostname,serial,currentOS,targetOS,compliant,deferralCount,maxDeferrals,deadline,pastDeadline,gracePeriodActive"
-            let values  = "\(host),\(serial),\(current),\(target),\(compliant),\(state.deferralCount),\(config.update.maxDeferrals),\(config.update.deadline),\(config.isPastDeadline),\(graceActive)"
+            let values  = "\(host),\(serial),\(current),\(target),\(compliant),\(state.deferralCount),\(config.update.maxDeferrals),\(config.effectiveDeadline),\(config.isPastDeadline),\(graceActive)"
             print(headers)
             print(values)
             return
@@ -72,7 +82,7 @@ struct ReportCommand {
             : "\u{001B}[31mNO ✗\u{001B}[0m")
         cliInfo("Release type:",  config.update.releaseType)
         cliInfo("Deferrals:",     "\(state.deferralCount)/\(config.update.maxDeferrals)")
-        cliInfo("Deadline:",      config.update.deadline.isEmpty ? "(none)" : config.update.deadline)
+        cliInfo("Deadline:",      config.effectiveDeadline.isEmpty ? "(none)" : config.effectiveDeadline)
         cliInfo("Past deadline:", config.isPastDeadline ? "\u{001B}[31mYES\u{001B}[0m" : "No")
         if graceActive, let until = state.gracePeriodUntil {
             cliInfo("Grace period:", "Active until \(ISO8601DateFormatter().string(from: until))")

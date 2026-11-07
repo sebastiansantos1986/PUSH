@@ -1,0 +1,210 @@
+Toast response and design update — November 5, 2026
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+PUSH engine 1.2.3 and PUSH Admin 0.1.4
+- Manual popup toast now waits for the actual UI process result rather than
+  hard-coding success at launch. Later reports User chose Later; close reports
+  User dismissed. Launch failures/timeouts are not labeled as user choices.
+- The toast no longer writes a shared /tmp/push-toast-action signal, and
+  scheduled checks no longer poll it. A manual popup test cannot request a
+  later upgrade through that file. Manual popup never runs InstallWorkflow.
+- The scheduled toast controller waits for its own UI result and requests an
+  install only on exit 0. Later/close/timeout never consume a toast deferral.
+- Scheduled toast handling is now synchronous for that daemon invocation,
+  bounded by the existing 15-minute UI wait, rather than fire-and-forget.
+- Compact opaque card, short default message, clear version heading, separate
+  deadline badge, larger full-width actions, and stronger secondary contrast.
+  Light custom accent colors use a dark primary-button label for readability.
+- Removed the fake always-present 60-second timer. A countdown only appears
+  when toast.autoDismissSeconds is greater than zero, pauses on hover, and
+  returns a distinct toast-timeout code (5). Zero/unset stays open until action
+  or the controller's maximum wait. The preview timeout is simulated once.
+- Custom toast messages and button labels remain configurable. Both apps use
+  the same new ToastView layout; custom images and symbols remain supported.
+
+Verification: all Release engine targets and the universal companion compile.
+17 isolated response-mapping assertions passed without a UI or app launch.
+The combined installer was expanded; versions, signatures, architecture slices,
+engine scripts, app-only companion payload, and preservation of config/state
+were inspected. No installer, PUSH app, popup, daemon, upgrade, or restart was
+launched. Actual click capture, auto-dismiss timing, and visual appearance need
+the user's live verification.
+
+Historical documentation follows:
+
+PUSH engine 1.2.2 — custom icon precedence
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+Custom ui.logoPath images and ui.sfSymbolName now take precedence over the
+bundled InstallAssistant icon. Images use aspect-fit rendering so logos are not
+cropped. No image path or YAML value is changed by installing the engine update.
+The existing no-user-password policy and installer safety behavior are retained.
+
+Release builds passed for Intel and Apple Silicon. The package was inspected
+without installation or application execution. Earlier verification notes below
+are historical, not a new live test of this revision.
+
+PUSH 1.2.1 — no end-user password prompts, November 5, 2026
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+Changes:
+- Legacy Keychain interaction is disabled before opening/querying entries.
+  Access failure returns without a Keychain authorization dialog.
+- Status no longer retrieves password bytes to determine an auth method.
+- Automatic login-password capture, its retries, and personal-login-credential
+  selection were removed. CLI/UI passwordPrompt routes are blocked.
+- Direct Apple Silicon installs require valid IT-managed authorization even if
+  the old requirePasswordOnAppleSilicon setting was disabled. No managed account
+  defaults to an end-user account. No credentials means leave installation to IT.
+- Explicit IT provisioning commands remain available; macOS Installer/sudo admin
+  authorization is separate from end-user PUSH password collection.
+
+Verified: PUSH-All Release builds for arm64 and x86_64; package expansion,
+version 1.2.1/build 121, exact installer scripts, signatures, architectures,
+no bundled config/state overwrite, no automatic daemon launch. No PUSH execution,
+Keychain access test, package installation, upgrade, or restart was performed.
+The live noninteractive behavior is for the user to verify after installation.
+Historical 42-check results below are not a new run of this revision. Current
+source includes 45 safe checks for the user to run.
+
+Earlier notes (historical):
+
+PUSH 1.2.0 — local test package update, November 5, 2026
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+New package: PUSH-1.2.0-Local-Test.pkg (separate output beside the source ZIP).
+See Packaging/INSTALL-AND-TEST.txt for installation and manual popup commands.
+
+Changes since the initial repaired-source delivery:
+- CLI and app version set to 1.2.0 (app build 120).
+- Uptime compliance compares versions numerically, so 27 equals 27.0.
+- The default compliant-screen heading no longer says Update Required.
+- Reproducible local package builder uses explicitly selected Release products.
+- Installer scripts back up the existing installation, preserve config/state and
+  Keychain entries, and pause scheduling until manual verification is complete.
+
+Verification for this package:
+- Rebuilt PUSH-All Release for arm64 and x86_64: BUILD SUCCEEDED.
+- Expanded the completed package and checked its identifier, version, install
+  location, non-relocatable UI bundle, scripts, payload, and preserved-file exclusions.
+- Both CPU architectures exist in packaged CLI and UI binaries.
+- Packaged CLI and app ad-hoc code signatures verify with strict checks.
+- Package scripts pass shell syntax checks. The package itself is unsigned.
+- No package installation, app launch, daemon execution, or upgrade was performed.
+- The earlier 42-check results below apply to the earlier source revision.
+  Two additional version-comparison checks are included for you to run; this
+  packaging session did not execute the application or rerun the test program.
+
+Earlier repair details and historical verification follow:
+
+PUSH repair review — November 5, 2026
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+OPEN THIS COPY
+Open PUSH.xcodeproj beside this file. The shared PUSH-All scheme builds
+push-cli, push-ui, and PreviewHost. This is source, not a deployment package.
+
+SOURCE AND ORIGINAL PROJECT
+The available source was copied from:
+/Users/sebastian.santos/Desktop/PUSH Project/PuSH-UPDATED/New-Push/PUSH-fixed
+Its source matched Downloads/PUSH-fixed-safety-pass (1).zip before repair.
+The referenced /mnt/data ZIPs were not available in this local session.
+The Desktop PUSH-fixed-review.zip was also found. The Desktop project was
+not overwritten. User-specific Xcode state, .DS_Store, and an obsolete nested
+PUSH.xcodeproj duplicate were omitted from this delivery. Original functionality,
+source headers, license, UI, CLI commands, and Sebastian Santos attribution remain.
+
+REPAIRS
+- Passwords and LAPS secrets are stored through Security.framework, with access
+  restricted to the creating executable. Existing entries receive a replacement
+  access policy when saved. Local validation uses OpenDirectory; no dscl password
+  arguments remain.
+- User credentials are read by the same push-ui executable that owns the login
+  keychain entry, in the console user's session. The prompt and CLI handoff now
+  agree; no plaintext password temporary file is used. Leading/trailing password
+  whitespace is preserved.
+- startosinstall and softwareupdate receive credentials through stdin, with
+  argument arrays rather than interpolated shell scripts. Raw installer output
+  and Jamf error response bodies are not logged. Download processes and blocking
+  UI execution no longer use predictable temporary executable wrappers.
+- System password and LAPS migration edits the correct YAML section and confirms
+  the write succeeded. It preserves unrelated settings, removes old multiline
+  credential content, and removes duplicate credential scalar fields. Legacy YAML
+  credential fallback remains supported for compatibility; migrate deployments
+  with auth set-password and jamf set-laps-secret. Do not place credentials in
+  command arguments or shell history.
+- Prompted console-user credentials retain that username even when localAccount
+  names a different admin. Secure Token checks apply to the account actually
+  authorizing installation. Missing/invalid required credentials fail closed.
+- Native update labels and mist version matching compare complete numeric
+  versions; 26.1 cannot match 26.10. Full installers require matching product OS
+  metadata, never their unrelated application bundle version. Modern installer
+  metadata can be inspected from SharedSupport.dmg mounted read-only. Unknown,
+  conflicting, incomplete, or wrong-version installers are rejected. Gatekeeper
+  assessment is required before executing startosinstall; --usage is not treated
+  as a signature check. Existing installers are never deleted on probe failure.
+- Installation state is persisted before launch. A kernel-held lock prevents
+  overlapping workflows. Failed launches/nonzero exits clear pending state;
+  successful staging waits for reboot and running-OS verification. The original
+  target and boot timestamp are retained. A reboot below target releases retry
+  state without marking completion. Completion is reported once. Auto-check does
+  not schedule another workflow while one is pending.
+- Installation and auto-check dry runs stop before prompting, downloading,
+  credentials, installation state changes, or reboot actions. Auto-check dry-run
+  now prints a no-action summary instead of polling or executing the schedule.
+- Progress files use a verified root-owned runtime directory under
+  /private/var/run/com.push. Child output is drained before waiting, preventing
+  pipe-buffer deadlocks; retained output is bounded. Installation progress uses
+  actual output rather than an invented countdown to reboot.
+
+VERIFICATION
+PASS: PUSH-All Debug, arm64 + x86_64, all 3 targets.
+PASS: PUSH-All Release, arm64 + x86_64, all 3 targets.
+PASS: Mach-O architecture inspection confirms both slices in Release outputs.
+PASS: 42 safe regression checks (Tests/run-safe-tests.sh).
+PASS: Developer attribution verification, 35 Swift files, zero failures.
+PASS: Original Desktop source still matches the independent baseline archive.
+
+Tests cover version boundaries, invalid targets, native label parsing, fixture
+installer discovery and metadata, missing tools, ambiguous assets, literal stdin
+password handling including shell metacharacters/whitespace, absent password argv,
+child/launch failures, large output without deadlock, UI error quoting, state
+transitions before/after reboot, changed targets, failed/partial upgrades, legacy
+state decoding, YAML credential migration, and both dry-run paths.
+
+No real macOS install, download, upgrade, reboot, privileged authentication,
+keychain modification, Jamf API request, or daemon deployment was performed.
+Fixture installer executables were never executed. Tests used local harmless
+utilities and temporary fixtures only.
+
+BUILD ENVIRONMENT AND LIMITS
+Built with the installed Xcode-beta.app / Apple Swift 6.4, macOS 27 SDK, retaining
+this project's macOS 14 deployment target. Code signing was disabled for these
+verification builds. The environment blocks nested sandbox creation by Swift
+macro subprocesses; verification alone used -Xfrontend -disable-sandbox so Apple's
+SwiftUI macros could compile inside the existing outer sandbox. This flag is NOT
+saved in project build settings. Cache/derived-data paths were redirected to the
+workspace. Warnings remain for legacy macOS Keychain APIs, existing UI/CLI code,
+and unavailable simulator services; both build configurations succeeded.
+
+Live login/System Keychain permissions, prior-entry ACL migration, Secure Token
+or volume-owner authorization, actual Apple installer metadata/mount/Gatekeeper,
+Jamf connectivity, live UI interaction, and upgrade/reboot behavior require a
+supervised test on a disposable managed Mac. Builds alone do not verify these.
+Use consistently signed binaries for production keychain identity; an unsigned
+rebuild or changed signing identity may require fresh user authorization. Older
+installer layouts lacking supported authoritative metadata fail closed.
+
+If a workflow was interrupted before reboot, it remains pending conservatively.
+After confirming no installer is running, an administrator can use the existing
+reset --install command to permit a retry. Legacy pending state without a boot
+stamp also may need this reset after an unsuccessful same-version reboot.
+
+The ZIP contains the repaired source and safe tests, not a signed/notarized app
+or a package to deploy. Build and review this separate copy before replacing or
+deploying the original. See SAFE-TEST-RESULTS.txt for the executed assertions.

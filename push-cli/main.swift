@@ -1,9 +1,19 @@
+// ==============================================================================
+// PUSH - Proactive Update Scheduling Helper
+//
+// Developer: Sebastian Santos
+// Copyright (c) 2026 Sebastian Santos. All rights reserved.
+//
+// Component: main.swift
+// Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+// ==============================================================================
+
 // main.swift — push-cli entry point
 // PUSH — Proactive Update Scheduling Helper
 
 import Foundation
 
-let cliVersion = "1.1.7"
+let cliVersion = "1.6.0"
 
 func printHelp() {
     print("""
@@ -12,7 +22,26 @@ func printHelp() {
 \u{001B}[1mDETECTION & SCHEDULING\u{001B}[0m
   auto-check              Detect updates, manage nudge schedule
   auto-check --dry-run    Preview without writing anything
-  auto-check --force      Re-run even if version already configured
+  auto-check --force      Ignore reminder timing and alert hours; retain safety checks
+  entra status            Saved per-user registration status (not cloud compliance)
+  entra check             Refresh local registration evidence; no popup or recon
+  entra notify            Show a LIVE reminder only when registration is needed
+  entra notify --force    Override reminder timing, not registration/setup checks
+  entra preview --stage 1 Safe preview of reminder stage 1–4
+  entra install-daemon    Enable separate 5-minute registration monitor
+  entra uninstall-daemon Pause registration monitoring
+  apps status             Show approved app policy and saved results
+  apps check              Check approved installed apps; no app downloads or installs
+  apps preview            Safe grouped-app toast test
+  apps notify             Show a LIVE app toast (Update can start app updates)
+  apps update all         Update eligible approved CLOSED apps (real action)
+  apps update chrome      Update one approved closed app
+  Add --force to apps update to override timing; open apps are still deferred
+  check-now               Discover and save the eligible target; no popup or install
+  notify-now              Discover and show the update prompt now; no automatic install
+  install-now             Discover and request installation now (real action)
+  force check|notify|install  Aliases for the three commands above
+  Add --dry-run to preview any command without actions
 
 \u{001B}[1mSTATUS\u{001B}[0m
   status                  Full compliance report
@@ -126,7 +155,6 @@ func printHelp() {
   sudo push-cli popup softNudge                               Daily nudge popup
   sudo push-cli popup hardBlock                               Hard block (deadline passed)
   sudo push-cli popup toast                                   Corner toast notification
-  sudo push-cli popup passwordPrompt                          Password entry dialog
   sudo push-cli popup downloading --download-progress 0.0 --download-subtitle "Connecting…"
   sudo push-cli popup downloading --download-progress 0.42 --download-subtitle "Downloading macOS… 42%"
   sudo push-cli popup downloading --download-progress 0.96 --download-subtitle "Finalizing… 11 of 13 GB"
@@ -176,7 +204,21 @@ let command = args.first ?? ""
 let rest    = args.isEmpty ? [] : Array(args.dropFirst())
 
 switch command {
-case "auto-check":       AutoCheckCommand(args: rest).run()
+case "check-now":        AutoCheckCommand(args: rest + ["--check-only"]).run()
+case "notify-now":       AutoCheckCommand(args: rest + ["--notify-only"]).run()
+case "install-now":      AutoCheckCommand(args: rest + ["--install-now"]).run()
+case "force":
+    switch rest.first {
+    case "check": AutoCheckCommand(args: Array(rest.dropFirst()) + ["--check-only"]).run()
+    case "notify": AutoCheckCommand(args: Array(rest.dropFirst()) + ["--notify-only"]).run()
+    case "install": AutoCheckCommand(args: Array(rest.dropFirst()) + ["--install-now"]).run()
+    default: cliError("Usage: push-cli force check|notify|install [--dry-run]")
+    }
+case "auto-check":
+    AppUpdatesCommand(args:["scheduled"] + (rest.contains("--scheduled") ? ["--from-daemon"] : []) + (rest.contains("--dry-run") ? ["--dry-run"] : [])).run()
+    AutoCheckCommand(args: rest).run()
+case "entra": EntraNudgeCommand(args:rest).run()
+case "apps": AppUpdatesCommand(args:rest).run()
 case "status":           StatusCommand(args: rest).run()
 case "check":            CheckCommand(args: rest).run()
 case "reboot":           RebootCommand(args: rest).run()
@@ -197,7 +239,6 @@ case "install-daemon":   InstallDaemonCommand(args: rest).run()
 case "uninstall-daemon": UninstallDaemonCommand(args: rest).run()
 case "self-update":      SelfUpdateCommand(args: rest).run()
 case "dashboard":        DashboardCommand(args: rest).run()
-case "wallpaper":        WallpaperCommand(args: rest).run()
 case "debug":            DebugCommand(args: rest).run()
 case "--help", "-h", "help", "": printHelp(); exit(0)
 case "--version", "-v":  print("push-cli v\(cliVersion)"); exit(0)
