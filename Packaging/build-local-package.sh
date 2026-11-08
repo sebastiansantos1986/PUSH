@@ -18,23 +18,58 @@ base="$stage/payload/Library/Management/PUSH"
 /bin/cp "$packaging/default-config.yaml" "$base/Local-Test/default-config.yaml"
 /bin/cp "$packaging/INSTALL-AND-TEST.txt" "$base/Local-Test/INSTALL-AND-TEST.txt"
 /bin/cp "$packaging/../LICENSE" "$base/Local-Test/LICENSE"
+/bin/cp "$packaging/resources/AppleHardwareCatalog.json" "$base/push-ui.app/Contents/Resources/AppleHardwareCatalog.json"
 /bin/chmod 755 "$base/push-cli"
 /usr/bin/codesign --force --sign - --timestamp=none "$base/push-cli"
 /usr/bin/codesign --force --sign - --timestamp=none "$base/push-ui.app"
 /usr/bin/codesign --verify --strict "$base/push-cli"
 /usr/bin/codesign --verify --deep --strict "$base/push-ui.app"
-printf '{"version":1,"minimumClient":"1.9.1"}\n' > "$base/user-request-protocol.json"
+# Dedicated, never-autostarted debug identity. Startup is routed to simulation
+# before all production UI handlers; executable name isolates popup cleanup.
+demo="$base/PUSH Major Upgrade Demo.app"
+/usr/bin/ditto "$base/push-ui.app" "$demo"
+/bin/mv "$demo/Contents/MacOS/push-ui" "$demo/Contents/MacOS/push-major-demo"
+info="$demo/Contents/Info.plist"
+for key in CFBundleExecutable CFBundleIdentifier CFBundleName CFBundleDisplayName; do
+    /usr/libexec/PlistBuddy -c "Delete :$key" "$info" >/dev/null 2>&1 || true
+done
+/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string push-major-demo' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.push.major-demo' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string PUSH Major Upgrade Demo' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string PUSH Major Upgrade Demo' "$info"
+/usr/bin/codesign --force --sign - --identifier com.push.major-demo --timestamp=none "$demo"
+/usr/bin/codesign --verify --deep --strict "$demo"
+
+notice="$base/PUSH Notices.app"
+/usr/bin/ditto "$base/push-ui.app" "$notice"
+/bin/mv "$notice/Contents/MacOS/push-ui" "$notice/Contents/MacOS/push-notice"
+info="$notice/Contents/Info.plist"
+for key in CFBundleExecutable CFBundleIdentifier CFBundleName CFBundleDisplayName; do
+    /usr/libexec/PlistBuddy -c "Delete :$key" "$info" >/dev/null 2>&1 || true
+done
+/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string push-notice' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.push.notice' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string PUSH Notices' "$info"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string PUSH Notices' "$info"
+/usr/bin/codesign --force --sign - --identifier com.push.notice --timestamp=none "$notice"
+/usr/bin/codesign --verify --deep --strict "$notice"
+
+printf '{"version":1,"minimumClient":"1.11.0"}\n' > "$base/user-request-protocol.json"
 
 /usr/bin/pkgbuild --analyze --root "$stage/payload" "$stage/components.plist"
 /usr/bin/plutil -replace 0.BundleIsRelocatable -bool NO "$stage/components.plist"
 /usr/bin/plutil -replace 0.BundleIsVersionChecked -bool NO "$stage/components.plist"
+/usr/bin/plutil -replace 1.BundleIsRelocatable -bool NO "$stage/components.plist"
+/usr/bin/plutil -replace 1.BundleIsVersionChecked -bool NO "$stage/components.plist"
+/usr/bin/plutil -replace 2.BundleIsRelocatable -bool NO "$stage/components.plist"
+/usr/bin/plutil -replace 2.BundleIsVersionChecked -bool NO "$stage/components.plist"
 /usr/bin/pkgbuild --root "$stage/payload" --component-plist "$stage/components.plist" \
     --scripts "$packaging/scripts" --ownership recommended \
-    --identifier com.push.pkg --version 1.9.1 --install-location / "$stage/push-component.pkg"
+    --identifier com.push.pkg --version 1.11.0 --install-location / "$stage/push-component.pkg"
 cat > "$stage/Distribution.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-<title>PUSH 1.9.1 — Local Test</title>
+<title>PUSH 1.11.0 — Local Test</title>
 <organization>com.push</organization>
 <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
 <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
@@ -42,7 +77,7 @@ cat > "$stage/Distribution.xml" <<'XML'
 <welcome file="welcome.html" mime-type="text/html"/>
 <choices-outline><line choice="push"/></choices-outline>
 <choice id="push" visible="false"><pkg-ref id="com.push.pkg"/></choice>
-<pkg-ref id="com.push.pkg" version="1.9.1" onConclusion="none">push-component.pkg</pkg-ref>
+<pkg-ref id="com.push.pkg" version="1.11.0" onConclusion="none">push-component.pkg</pkg-ref>
 </installer-gui-script>
 XML
 /usr/bin/productbuild --distribution "$stage/Distribution.xml" --resources "$packaging/resources" \

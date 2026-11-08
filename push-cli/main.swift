@@ -13,13 +13,16 @@
 
 import Foundation
 
-let cliVersion = "1.9.1"
+let cliVersion = "1.11.0"
 
 func printHelp() {
     print("""
 \u{001B}[1mpush-cli\u{001B}[0m v\(cliVersion) — PUSH Command Line Interface
 
 \u{001B}[1mDETECTION & SCHEDULING\u{001B}[0m
+  notice                  Standalone informational alert/toast
+  hardware check --target 27 [--popup]  Apple hardware support check
+  major-offer --debug     Safe optional major-upgrade simulation (no live actions)
   auto-check              Detect updates, manage nudge schedule
   auto-check --dry-run    Preview without writing anything
   auto-check --force      Ignore reminder timing and alert hours; retain safety checks
@@ -206,6 +209,9 @@ let command = args.first ?? ""
 let rest    = args.isEmpty ? [] : Array(args.dropFirst())
 
 switch command {
+case "notice": StandaloneNoticeCommand(args:rest).run()
+case "hardware": HardwareCompatibilityCommand(args:rest).run()
+case "major-offer": MajorUpgradeDemoCommand(args:rest).run()
 case "check-now":        AutoCheckCommand(args: rest + ["--check-only"]).run()
 case "notify-now":       AutoCheckCommand(args: rest + ["--notify-only"]).run()
 case "install-now":      AutoCheckCommand(args: rest + ["--install-now"]).run()

@@ -1,3 +1,13 @@
+# Optional Major Upgrade Debug Preview
+
+Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+Current local test build: engine 1.10.0 / Admin 1.2.0 / JamfCheckIn 1.1.0 unchanged.
+
+PUSH Admin → Major Upgrade (Debug) previews one optional-offer window through simulated download, preparation and restart-ready stages. The client also includes an isolated, never-autostarted demo app. Run `push-cli major-offer --debug` as the logged-in user without sudo after installing the matching client. Every button is simulated; no live installer or restart route is enabled. See PUSH-Major-Upgrade-Debug-Guide.txt for test steps and boundaries. Existing required-update workflows are retained separately.
+
+## Previous release documentation
+
 # PUSH Admin 1.1.0
 
 Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS

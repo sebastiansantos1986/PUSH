@@ -46,9 +46,17 @@ struct DeploymentBundleInput {
     var assets:[String:Data] // fixed relative payload paths, never arbitrary filesystem writes
     var teamID:String
     var restartIdentity:RestartProfileIdentity?=nil
+    var majorSettings:MajorOfferSettings?=nil
+    var hardwareCatalog:AppleHardwareCatalog?=nil
 }
 enum DeploymentBundle {
     static func digest(_ data:Data)->String {SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()}
+    static func relativePath(_ file:URL,to root:URL)throws->String {
+        let prefix=root.standardizedFileURL.resolvingSymlinksInPath().path+"/"
+        let path=file.standardizedFileURL.resolvingSymlinksInPath().path
+        guard path.hasPrefix(prefix) else {throw DeploymentBundleError.invalid("An export file escaped its staging directory.")}
+        return String(path.dropFirst(prefix.count))
+    }
     static func allowedAsset(_ path:String)->Bool {
         let parts=path.split(separator:"/",omittingEmptySubsequences:false)
         guard !path.hasPrefix("/"),!parts.contains(".."),!parts.contains("."),!parts.contains(""),path.hasSuffix(".png") else{return false}
@@ -58,6 +66,7 @@ enum DeploymentBundle {
         let fm=FileManager.default
         guard !fm.fileExists(atPath:destination.path) else {throw DeploymentBundleError.invalid("Choose a new export folder. Existing deployment bundles are never replaced.")}
         guard client.pathExtension=="pkg",let values=try? client.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey,.fileSizeKey]),values.isRegularFile==true,values.isSymbolicLink != true,(values.fileSize ?? 0)>0 else {throw DeploymentBundleError.invalid("The client installer is missing. Reinstall the matching PUSH Admin release.")}
+        if let settings=input.majorSettings {_=try settings.validated()}
         let profiles=try DeploymentProfiles.files(teamID:input.teamID,restartIdentity:input.restartIdentity)
         guard input.assets.keys.allSatisfy(allowedAsset) else {throw DeploymentBundleError.invalid("An image destination is outside the managed asset folders.")}
         // Stage beside the destination, then rename only after every file is ready.
@@ -67,8 +76,10 @@ enum DeploymentBundle {
         func put(_ path:String,_ data:Data,_ mode:Int=0o600)throws {
             let url=stage.appendingPathComponent(path);try fm.createDirectory(at:url.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700]);try data.write(to:url,options:.atomic);try fm.setAttributes([.posixPermissions:mode],ofItemAtPath:url.path)
         }
-        try fm.copyItem(at:client,to:stage.appendingPathComponent("PUSH-Client-1.9.1.pkg"))
+        try fm.copyItem(at:client,to:stage.appendingPathComponent("PUSH-Client-1.11.0.pkg"))
         try put("PolicyPayload/Library/Management/PUSH/config.yaml",Data(input.yaml.utf8))
+        if let catalog=input.hardwareCatalog {try put("PolicyPayload/Library/Management/PUSH/assets/hardware/AppleHardwareCatalog.json",JSONEncoder().encode(catalog))}
+        if let settings=input.majorSettings {try put("PolicyPayload/Library/Management/PUSH/major-offer.json",JSONEncoder().encode(settings))}
         for (path,data) in input.assets {try put("PolicyPayload/Library/Management/PUSH/"+path,data)}
         for (name,data) in profiles {try put("Profiles/"+name,data)}
         try put("Build-Policy-Package.command",Data(buildPolicy.utf8),0o700)
@@ -76,9 +87,9 @@ enum DeploymentBundle {
         try put("READ-ME-FIRST.txt",Data(readme(teamID:input.teamID).utf8))
         var entries:[[String:String]]=[]
         for case let file as URL in fm.enumerator(at:stage,includingPropertiesForKeys:[.isRegularFileKey])! {
-            if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {entries.append(["path":String(file.path.dropFirst(stage.path.count+1)),"sha256":digest(try Data(contentsOf:file))])}
+            if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {entries.append(["path":try relativePath(file,to:stage),"sha256":digest(try Data(contentsOf:file))])}
         }
-        let manifest:[String:Any]=["formatVersion":1,"developer":"Sebastian Santos","engineVersion":"1.9.1","jamfCheckInVersion":"1.1.0","adminIncludedOnClients":false,"signingReadiness":input.teamID.isEmpty ? "Local testing only; no production Team ID supplied":"Verify Developer ID signatures and notarization before fleet rollout; Team ID is a profile constraint, not proof of signing","teamID":input.teamID,"restartProfileSourceSHA256":input.restartIdentity?.sha256 ?? "not included","files":entries.sorted{$0["path"]!<$1["path"]!}]
+        let manifest:[String:Any]=["formatVersion":1,"developer":"Sebastian Santos","engineVersion":"1.11.0","jamfCheckInVersion":"1.1.1","adminIncludedOnClients":false,"signingReadiness":input.teamID.isEmpty ? "Local testing only; no production Team ID supplied":"Verify Developer ID signatures and notarization before fleet rollout; Team ID is a profile constraint, not proof of signing","teamID":input.teamID,"restartProfileSourceSHA256":input.restartIdentity?.sha256 ?? "not included","files":entries.sorted{$0["path"]!<$1["path"]!}]
         try put("manifest.json",JSONSerialization.data(withJSONObject:manifest,options:[.prettyPrinted,.sortedKeys]))
         try fm.moveItem(at:stage,to:destination)
     }
@@ -112,7 +123,7 @@ enum DeploymentBundle {
     """+"\n"
     static func readme(teamID:String)->String {"""
     PUSH Client Deployment — Sebastian Santos
-    Engine 1.9.1 / JamfCheckIn 1.1.0 / PUSH Admin 1.1.0
+    Engine 1.11.0 / JamfCheckIn 1.1.1 / PUSH Admin 1.3.0
 
     This bundle excludes PUSH Admin from client computers. The client installs PUSH
     and JamfCheckIn, its only menu-bar app. The old standalone PUSH Status is retired.
@@ -130,7 +141,7 @@ enum DeploymentBundle {
        If the old JamfCheckIn notifications profile is deployed, replace/unscope it to
        avoid conflicting notification payloads. Team constraints must match all signed
        executables for the matching service labels.
-    3. Deploy PUSH-Client-1.9.1.pkg. Previous PUSH/JamfCheckIn files are backed up.
+    3. Deploy PUSH-Client-1.11.0.pkg. Previous PUSH/JamfCheckIn files are backed up.
        PUSH monitors are paused. Nothing is launched by the installer. JamfCheckIn
        starts on the next graphical login, or the user can open it manually.
     4. Run Build-Policy-Package.command on your IT Mac to create PUSH-Policy.pkg.

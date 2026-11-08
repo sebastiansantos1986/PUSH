@@ -73,6 +73,26 @@
 		U304 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F104 /* SharedComponents.swift */; };
 		U305 /* PopupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F105 /* PopupViews.swift */; };
 		U306 /* InstallAssistant.icns in Resources */ = {isa = PBXBuildFile; fileRef = F106 /* InstallAssistant.icns */; };
+        MJD_PUI = {isa = PBXBuildFile; fileRef = MJD_POL; };
+        MJD_PCL = {isa = PBXBuildFile; fileRef = MJD_POL; };
+        MJD_PPV = {isa = PBXBuildFile; fileRef = MJD_POL; };
+        MJD_VUI = {isa = PBXBuildFile; fileRef = MJD_VIEW; };
+        MJD_VPV = {isa = PBXBuildFile; fileRef = MJD_VIEW; };
+        MJD_PRUI = {isa = PBXBuildFile; fileRef = MJD_PRES; };
+        MJD_CCLI = {isa = PBXBuildFile; fileRef = MJD_CMD; };
+        PEXFUI = {isa = PBXBuildFile; fileRef = PEXF; };
+        PEXFCL = {isa = PBXBuildFile; fileRef = PEXF; };
+        PEXFPV = {isa = PBXBuildFile; fileRef = PEXF; };
+        HWFUI = {isa = PBXBuildFile; fileRef = HWF; };
+        HWFCL = {isa = PBXBuildFile; fileRef = HWF; };
+        HWFPV = {isa = PBXBuildFile; fileRef = HWF; };
+        HWRFUI = {isa = PBXBuildFile; fileRef = HWRF; };
+        HWRFCL = {isa = PBXBuildFile; fileRef = HWRF; };
+        HWRFPV = {isa = PBXBuildFile; fileRef = HWRF; };
+        SNOTFUI = {isa = PBXBuildFile; fileRef = SNOTF; };
+        SNOTFPV = {isa = PBXBuildFile; fileRef = SNOTF; };
+        SNOTPUI = {isa = PBXBuildFile; fileRef = SNOTP; };
+        HWCFCL = {isa = PBXBuildFile; fileRef = HWCF; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -129,6 +149,16 @@
 		P001 /* push-ui.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "push-ui.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		P002 /* push-cli */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "push-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
 		P003 /* PreviewHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PreviewHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        MJD_POL = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/MajorUpgradeDemoPolicy.swift; sourceTree = SOURCE_ROOT; };
+        MJD_VIEW = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MajorUpgradeDemoView.swift; sourceTree = "<group>"; };
+        MJD_PRES = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MajorUpgradeDemoPresenter.swift; sourceTree = "<group>"; };
+        MJD_CMD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MajorUpgradeDemoCommand.swift; sourceTree = "<group>"; };
+        PEXF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/PopupExperiencePolicy.swift; sourceTree = SOURCE_ROOT; };
+        HWF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/AppleHardwarePolicy.swift; sourceTree = SOURCE_ROOT; };
+        HWRF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/AppleHardwareReader.swift; sourceTree = SOURCE_ROOT; };
+        SNOTF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneNoticeView.swift; sourceTree = "<group>"; };
+        SNOTP = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneNoticePresenter.swift; sourceTree = "<group>"; };
+        HWCF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAndNotices.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -187,7 +217,7 @@
                 FENT001 /* EntraNudge.swift */,
                 FHEALTH1 /* RuntimeHealth.swift */,
                 FBACK001,
-                FHIST01, WALLF01, WCMDF1, RECF001, URQF001,
+                FHIST01, WALLF01, WCMDF1, RECF001, URQF001, MJD_CMD, HWCF,
 				F219 /* MDMCommand.swift */,
 				F220 /* AuthCommand.swift */,
 			);
@@ -216,7 +246,7 @@
 			isa = PBXGroup;
 			children = (
                 SS00,
-                VSHARED, RSHF001, USHF001,
+                VSHARED, RSHF001, USHF001, PEXF, HWF, HWRF, MJD_POL,
 				GRP_UI /* push-ui */,
 				GRP_CLI /* push-cli */,
 				GRP_PREVIEW /* PreviewHost */,
@@ -234,7 +264,7 @@
 				F104 /* SharedComponents.swift */,
 				F105 /* PopupViews.swift */,
 				F106 /* InstallAssistant.icns */,
-                WALLUF1, RECV001, STATUSF1,
+                WALLUF1, RECV001, STATUSF1, MJD_VIEW, MJD_PRES, SNOTF, SNOTP,
 			);
 			path = "push-ui";
 			sourceTree = "<group>";
@@ -380,7 +410,7 @@
 			buildActionMask = 2147483647;
 			files = (
                 SS01,
-                VUI0001, STATUSUI, STATUSCF, RECUI01, RSHUI01, USHUI01,
+                PEXFUI, HWFUI, HWRFUI, SNOTFUI, SNOTPUI, MJD_PUI, MJD_VUI, MJD_PRUI, VUI0001, STATUSUI, STATUSCF, RECUI01, RSHUI01, USHUI01,
                 WALLU01,
 				U101 /* main.swift in Sources */,
 				U102 /* UIConfig.swift in Sources */,
@@ -397,7 +427,7 @@
 			files = (
                 IS01,
                 SS02,
-                VCLI001, RECSTR1, URQSTR1, RSHCL01, USHCL01,
+                PEXFCL, HWFCL, HWRFCL, HWCFCL, MJD_PCL, MJD_CCLI, VCLI001, RECSTR1, URQSTR1, RSHCL01, USHCL01,
 				U201 /* main.swift in Sources */,
 				U202 /* CLIHelpers.swift in Sources */,
 				U203 /* CLIConfig.swift in Sources */,
@@ -435,7 +465,7 @@
 			buildActionMask = 2147483647;
 			files = (
                 SS03,
-                VPREV01, RECUI02, RSHPV01, USHPV01,
+                PEXFPV, HWFPV, HWRFPV, SNOTFPV, MJD_PPV, MJD_VPV, VPREV01, RECUI02, RSHPV01, USHPV01,
 				U301 /* PreviewApp.swift in Sources */,
 				U302 /* UIConfig.swift in Sources */,
 				U303 /* UIState.swift in Sources */,
@@ -452,8 +482,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -465,8 +495,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -478,8 +508,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -494,8 +524,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -532,8 +562,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
@@ -550,8 +580,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.9.1;
-                CURRENT_PROJECT_VERSION = 191;
+                MARKETING_VERSION = 1.11.0;
+                CURRENT_PROJECT_VERSION = 1110;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;

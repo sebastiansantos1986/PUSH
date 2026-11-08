@@ -77,6 +77,15 @@ struct InstallWorkflow {
             cliSuccess("This Mac already meets the requested macOS version.")
             return
         }
+        if let requested=AppleHardwareCatalog.major(config.update.targetVersion),let current=AppleHardwareCatalog.major(currentMacOSVersion()),requested>current {
+            let support=AppleHardwareReader.assessment(target:config.update.targetVersion)
+            if support.state == .unsupported {
+                let message="Hardware is not supported for the selected macOS major. "+support.reason
+                cliError(message);InstallRecoveryStore.failure(config:config,message:message)
+                _=StandalonePopupLauncher.show(support.notice());return
+            }
+            if support.state == .unknown {cliLog("[Hardware] Compatibility not verified; no support claim made. Existing installer/platform checks remain required.")}
+        }
         cliLog("[Install] Starting for \(config.update.targetVersion)")
 
         // Prevent sleep for the entire install workflow — download + install can

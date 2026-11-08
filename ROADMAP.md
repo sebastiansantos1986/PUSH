@@ -1,6 +1,6 @@
 # PUSH roadmap
 
-Developer: Sebastian Santos · Current test release: engine 1.9.1 / Admin 1.1.0 / JamfCheckIn 1.1.0.
+Developer: Sebastian Santos · Current test release: engine 1.11.0 / Admin 1.3.0 / JamfCheckIn 1.1.1.
 
 ## Implemented
 
@@ -15,8 +15,12 @@ Developer: Sebastian Santos · Current test release: engine 1.9.1 / Admin 1.1.0 
 - Complete configured-client builder with reviewed YAML/images and paused/deferred-monitor modes.
 - Rule-based setup suggestions, profile export, artifact manifests and package-build fixture tests.
 
+- Isolated major-offer simulation with presentation settings and a major-only preview package.
+- Informational standalone alerts/toasts and Apple hardware compatibility assessment.
+
 ## Before a production fleet rollout
 
+- Finish and pilot the live optional-upgrade request/progress/restart route; currently disabled.
 - Establish verified Developer ID app/installer signing and notarization.
 - Validate management profiles, optional restart TCC attribution, managed authorization and native GUI delivery on an enrolled pilot.
 - Exercise actual install/reboot verification and rollback/support procedures on a pilot.

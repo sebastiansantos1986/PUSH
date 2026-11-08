@@ -6,6 +6,7 @@ import AppKit
 struct DeploymentExportCard:View {
     @EnvironmentObject var store:AdminStore
     @State private var teamID=""
+    @State private var scope:ClientPackageScope = .full
     @State private var activation:ClientActivation = .paused
     @State private var restartIdentity:RestartProfileIdentity?
     var body:some View {
@@ -22,10 +23,12 @@ struct DeploymentExportCard:View {
                 }
                 Text(restartIdentity == nil ? "Restart enforcement requires a verified signing identity before export. Local ad-hoc binaries cannot provide a stable approval.":"Production signing identity selected. Verify the matching signed release and TCC attribution on a managed pilot.").font(.caption).foregroundStyle(.secondary)
             }
-            Picker("After installation",selection:$activation){ForEach(ClientActivation.allCases){mode in Text(mode.title).tag(mode)}}.pickerStyle(.menu)
+            Picker("Package contents",selection:$scope){ForEach(ClientPackageScope.allCases){Text($0.title).tag($0)}}.onChange(of:scope){_,value in if value == .majorOfferOnly {activation = .paused}}
+            if scope == .majorOfferOnly {Text("Major-only preview: no JamfCheckIn or enforcement monitors. The upgrade flow stays debug-only; single informational popups and hardware checks are available.").font(.callout).foregroundStyle(.secondary)}
+            Picker("After installation",selection:$activation){ForEach(ClientActivation.allCases){mode in Text(mode.title).tag(mode)}}.pickerStyle(.menu).disabled(scope == .majorOfferOnly)
             Text(activation == .paused ? "For pilots: the approved policy is installed, and monitoring stays paused.":"For reviewed live deployments: installation starts selected monitors. First checks wait five minutes, then may notify, download, install or restart according to your policy.").font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button(store.isBuildingDeployment ? "Building installer…":"Build complete client installer…"){store.buildConfiguredClient(teamID:teamID,restartIdentity:restartIdentity,activation:activation)}.buttonStyle(.borderedProminent).disabled(store.isBuildingDeployment || !store.document.problems.isEmpty)
+                Button(store.isBuildingDeployment ? "Building installer…":"Build complete client installer…"){store.buildConfiguredClient(teamID:teamID,restartIdentity:restartIdentity,activation:activation,scope:scope)}.buttonStyle(.borderedProminent).disabled(store.isBuildingDeployment || !store.document.problems.isEmpty)
                 if store.isBuildingDeployment {ProgressView().controlSize(.small)}
             }
             Text("Building never installs the result or starts PUSH on this Mac. Future installation replaces the previous YAML after backup. Select the matching signed release before fleet rollout.").font(.caption).foregroundStyle(.secondary)
@@ -37,7 +40,7 @@ struct DeploymentExportCard:View {
 extension AdminStore {
     func exportDeploymentBundle(teamID:String,restartIdentity:RestartProfileIdentity?=nil) {
         guard document.problems.isEmpty else {notice="Resolve draft validation issues before exporting.";return}
-        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.9.1",withExtension:"pkg") else {notice="The matching client installer is missing from PUSH Admin. Reinstall version 1.1.0.";return}
+        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.11.0",withExtension:"pkg") else {notice="The matching client installer is missing from PUSH Admin. Reinstall version 1.1.0.";return}
         do {
             let input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity)
             let panel=NSSavePanel();panel.nameFieldStringValue="PUSH-Deployment-"+Date().formatted(.iso8601.year().month().day().dateSeparator(.dash));panel.title="Export a new deployment folder";panel.message="Choose a new folder name. Existing exports are never replaced.";panel.canCreateDirectories=true
@@ -49,7 +52,10 @@ extension AdminStore {
 }
 
 extension AdminStore {
-    func deploymentInput(teamID:String,restartIdentity:RestartProfileIdentity?)throws->DeploymentBundleInput {
+    func deploymentInput(teamID:String,restartIdentity:RestartProfileIdentity?,scope:ClientPackageScope = .full)throws->DeploymentBundleInput {
+        if scope == .majorOfferOnly {
+            return .init(yaml:ClientPackageScope.majorPolicy.yaml,assets:[:],teamID:teamID,majorSettings:try majorSettings.validated(),hardwareCatalog:AppleHardwareReader.bundled())
+        }
         if document.setupFlag("uptime.enabled"),restartIdentity?.valid(for:teamID) != true {throw DeploymentBundleError.invalid("Restart enforcement uses System Events automation. Select the matching production-signed push-cli to generate its restricted approval, or disable restart enforcement for local testing.")}
         var images:[String:Data]=[:]
         let logo=document.setupValue("ui.logoPath")
@@ -72,17 +78,17 @@ extension AdminStore {
         // Sanitize even edited drafts before bundling; never export known credential fields.
         let safe=ConfigDocument.load(document.yaml,name:"Deployment export")
         guard safe.problems.isEmpty else {throw DeploymentBundleError.invalid("The sanitized deployment policy did not validate.")}
-        return .init(yaml:safe.yaml,assets:images,teamID:teamID.trimmingCharacters(in:.whitespacesAndNewlines),restartIdentity:document.setupFlag("uptime.enabled") ? restartIdentity:nil)
+        return .init(yaml:safe.yaml,assets:images,teamID:teamID.trimmingCharacters(in:.whitespacesAndNewlines),restartIdentity:document.setupFlag("uptime.enabled") ? restartIdentity:nil,majorSettings:try majorSettings.validated(),hardwareCatalog:AppleHardwareReader.bundled())
     }
-    func buildConfiguredClient(teamID:String,restartIdentity:RestartProfileIdentity?,activation:ClientActivation) {
+    func buildConfiguredClient(teamID:String,restartIdentity:RestartProfileIdentity?,activation:ClientActivation,scope:ClientPackageScope = .full) {
         guard !isBuildingDeployment else{return}
-        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.9.1",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.1.0.";return}
+        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.11.0",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.3.0.";return}
         do {
-            let input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity)
+            let input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity,scope:scope)
             let reviewed=ConfigDocument.load(input.yaml,name:"Package review")
             try ConfiguredClientBuilder.validate(reviewed,activation:activation)
             let review=NSAlert();review.messageText="Build the reviewed client installer?"
-            review.informativeText="Mode: "+activation.title+"\n\nIncludes PUSH, JamfCheckIn, the reviewed YAML and selected images. Installing this package replaces the previous policy after backup.\n\n"+(activation == .monitor ? "Future installation loads live monitors with a five-minute first-check delay. Checks can download, install or restart. MDM profiles and endpoint authorization must be ready first.":"Future installation keeps monitoring paused for pilot review.")+"\n\nBuilding now performs no installation or service activation."
+            review.informativeText="Contents: "+scope.title+"\nMode: "+activation.title+"\n\nIncludes the components in the selected profile, reviewed YAML and presentation assets. Installing this package replaces the previous policy after backup.\n\n"+(activation == .monitor ? "Future installation loads live monitors with a five-minute first-check delay. Checks can download, install or restart. MDM profiles and endpoint authorization must be ready first.":"Future installation keeps monitoring paused for pilot review.")+"\n\nBuilding now performs no installation or service activation."
             review.addButton(withTitle:"Build Installer");review.addButton(withTitle:"Cancel")
             guard review.runModal() == .alertFirstButtonReturn else{return}
             let panel=NSSavePanel();panel.nameFieldStringValue="PUSH-Configured-Deployment";panel.title="Choose a new output folder";panel.message="The installer, profiles and review files will be saved together. Existing folders are never replaced.";panel.canCreateDirectories=true
@@ -90,10 +96,10 @@ extension AdminStore {
             isBuildingDeployment=true;notice="Building the reviewed client installer. No installed settings or services are changing."
             Task {
                 let result=await Task.detached(priority:.userInitiated){()->String? in
-                    do {try ConfiguredClientBuilder.build(input,client:client,activation:activation,to:destination);return nil}catch{return error.localizedDescription}
+                    do {try ConfiguredClientBuilder.build(input,client:client,activation:activation,scope:scope,to:destination);return nil}catch{return error.localizedDescription}
                 }.value
                 isBuildingDeployment=false
-                notice=result.map{"Installer build failed: "+$0} ?? "Built PUSH-Configured-Client.pkg with your reviewed policy and images. Profiles are alongside it for MDM delivery. Nothing was installed or activated on this Mac."
+                notice=result.map{"Installer build failed: "+$0} ?? "Built the selected client profile with reviewed policy and presentation. See its READ-ME-FIRST. Nothing was installed or activated on this Mac."
             }
         }catch {notice="Review before building: "+error.localizedDescription}
     }

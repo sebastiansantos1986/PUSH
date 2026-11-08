@@ -17,6 +17,12 @@ import AppKit
 // MARK: - Argument parsing
 
 let args = CommandLine.arguments
+if Bundle.main.bundleIdentifier=="com.push.notice" {
+    guard args.count==3,args[1]=="--notice-payload" else {Foundation.exit(99)}
+    MainActor.assumeIsolated {StandaloneNoticePresenter.run(args[2])}
+}
+// A dedicated app identity always enters simulation before any live handler.
+if Bundle.main.bundleIdentifier=="com.push.major-demo" {MainActor.assumeIsolated {MajorUpgradeDemoPresenter.run(Array(args.dropFirst()))}}
 handleWallpaperRequest(args)
 if Bundle.main.bundleIdentifier=="com.push.status" {PushStatusApp.main();Foundation.exit(0)}
 handleCredentialRequest(args)

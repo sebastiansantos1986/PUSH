@@ -74,6 +74,7 @@ extension ConfigDocument {
         // A digest of the attached image covers branding changes without storing
         // the YAML, image, account names, or credentials in preview history.
         if let image=logoImageData {bytes.append(contentsOf:SHA256.hash(data:image))}
+        if let settings=majorOfferSettings {let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys];if let data=try? encoder.encode(settings){bytes.append(data)}}
         return SHA256.hash(data:bytes).map{String(format:"%02x",$0)}.joined()
     }
     var setupStrategy:SetupMacStrategy {

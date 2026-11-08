@@ -6,10 +6,12 @@ import AppKit
 import Combine
 
 enum AdminPage: String, CaseIterable, Identifiable {
+    case singlePopup = "Single Popups"
+    case majorUpgrade = "Major Upgrade (Debug)"
     case recovery = "User Status & Recovery", history = "Delivery History", wallpaper = "Wallpaper", setup = "Guided Setup", readiness = "Readiness", overview = "Overview", catalog = "macOS Releases", configuration = "Configuration", apps = "App Updates", entra = "Entra Registration", studio = "Popup Studio", deployment = "Deployment"
     var id: String { rawValue }
     var icon: String {
-        switch self { case .recovery:return "arrow.clockwise.circle"; case .history:return "clock.arrow.circlepath"; case .wallpaper:return "photo"; case .setup:return "wand.and.stars"; case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
+        switch self { case .singlePopup:return "bubble.left.and.text.bubble.right"; case .majorUpgrade:return "arrow.up.square"; case .recovery:return "arrow.clockwise.circle"; case .history:return "clock.arrow.circlepath"; case .wallpaper:return "photo"; case .setup:return "wand.and.stars"; case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
     }
 }
 @main
@@ -19,7 +21,7 @@ struct PUSHAdminApp: App {
         WindowGroup("PUSH Admin") { AdminRoot().environmentObject(store).frame(minWidth:1100,minHeight:780) }
             .defaultSize(width:1250,height:900)
         Settings { VStack(alignment:.leading,spacing:12) {
-            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.1.0 · Developer: Sebastian Santos")
+            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.3.0 · Developer: Sebastian Santos")
             Text("Mist checks run at launch and when you refresh. They list stable installers compatible with this Mac; they never download an installer.")
             Link("mist-cli project",destination:URL(string:"https://github.com/ninxsoft/mist-cli")!)
         }.padding(28).frame(width:500) }
@@ -66,7 +68,7 @@ struct AdminRoot: View {
             Divider()
             VStack(alignment: .leading, spacing: 5) {
                 Label("User password prompts disabled", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
-                Text("Sebastian Santos · v1.1.0").font(.caption2).foregroundStyle(.tertiary)
+                Text("Sebastian Santos · v1.3.0").font(.caption2).foregroundStyle(.tertiary)
             }.padding(18)
         }.background(Color(NSColor.controlBackgroundColor))
     }
@@ -83,6 +85,8 @@ struct AdminRoot: View {
             Divider()
             Group {
                 switch page {
+                case .singlePopup: SinglePopupPage()
+                case .majorUpgrade: MajorUpgradePage()
                 case .recovery: RecoverySettingsPage()
                 case .history: NotificationHistoryPage(navigate: {page = $0})
                 case .wallpaper: WallpaperPage(navigate: {page = $0})

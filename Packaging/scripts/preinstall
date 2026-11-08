@@ -41,7 +41,7 @@ fi
 /bin/chmod 700 "$backup_root"
 backup="$backup_root/$(/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
 /bin/mkdir "$backup"
-for item in push-cli push-ui.app "PUSH Status.app" config.yaml config.json state.json detections.json apps-state.json entra-state.json preparation.json preparation notification-history.json install-recovery.json user-request-result.json assets health; do
+for item in push-cli push-ui.app "PUSH Major Upgrade Demo.app" "PUSH Notices.app" major-offer.json "PUSH Status.app" config.yaml config.json state.json detections.json apps-state.json entra-state.json preparation.json preparation notification-history.json install-recovery.json user-request-result.json assets health; do
     if [[ -e "$base/$item" || -L "$base/$item" ]]; then
         /usr/bin/ditto "$base/$item" "$backup/$item"
     fi
@@ -74,6 +74,8 @@ fi
 if [[ -e "$plist" || -L "$plist" ]]; then /bin/rm "$plist"; fi
 /usr/bin/pkill -x push-ui 2>/dev/null || true
 /usr/bin/pkill -x push-status 2>/dev/null || true
+/usr/bin/pkill -x push-major-demo 2>/dev/null || true
+/usr/bin/pkill -x push-notice 2>/dev/null || true
 /bin/mkdir -p "$base/logs" "$base/downloads"
 printf '%s\n' "$backup" > "$base/last-package-backup.txt"
 /bin/chmod 600 "$base/last-package-backup.txt"

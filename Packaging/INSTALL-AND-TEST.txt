@@ -1,3 +1,86 @@
+PUSH Optional Major Upgrade — Safe Debug Preview
+Engine 1.10.0 / PUSH Admin 1.2.0 / JamfCheckIn unchanged at 1.1.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+EASIEST TEST — ADMIN ONLY
+Install PUSH-Admin-1.2.0.pkg on your IT Mac, open PUSH Admin, then select
+Major Upgrade (Debug). Click Update in the embedded preview. The SAME view changes
+through Downloading → Preparing → Ready to restart. Restart now completes the
+example with a simulated message; your Mac does not restart.
+
+Use Load / reset demo to change example versions or duration. The selected target
+must have a higher major version: minor updates and downgrades are rejected.
+Skip stage, Pause / Resume, Reset demo and Simulate a problem exercise the states.
+No client installation is needed for the embedded Admin preview.
+
+STANDALONE POPUP TEST
+1. Quit PUSH Admin and allow active PUSH commands/workflows to finish.
+2. Install PUSH-Client-1.10.0.pkg yourself. The generic installer preserves existing
+   YAML/state/credentials, backs up prior files and pauses both PUSH monitors.
+   It includes JamfCheckIn and a separate NEVER-AUTOSTARTED demo app.
+3. Run this as your logged-in user, WITHOUT sudo:
+
+   /Library/Management/PUSH/push-cli major-offer --debug
+
+Optional example versions / total animation duration:
+
+   /Library/Management/PUSH/push-cli major-offer --debug --from 26.0 --to 27.0 --duration 20
+
+Or open /Library/Management/PUSH/PUSH Major Upgrade Demo.app manually.
+PUSH Admin's Major Upgrade (Debug) page can open that installed window too.
+
+The popup is one window, not a sequence of separate windows. Keep working hides
+only this demo window while its in-memory simulation continues. Reopen it with the
+temporary PUSH Demo menu. The window returns when its example reaches restart-ready.
+Later hides the ready window but saves no schedule. Restart now only shows the
+simulated completion. Close the window or choose Quit demo to stop it completely.
+Quit an existing demo before launching different sample versions/durations.
+
+SAFETY BOUNDARIES
+- DEBUG / SIMULATION ONLY remains visible throughout the flow.
+- Example versions/progress are not catalog data or actual installer progress.
+- No discovery, network transfer, download, installer, update request or reboot.
+- No live YAML read, production state/deferral/result/history write or Keychain access
+  in the standalone demo. The CLI opens only the fixed isolated demo application.
+- No password or authorization fallback. Running the CLI/demo as root is refused.
+- --debug is required by the CLI. Live/force/install/config-path flags are rejected.
+- The dedicated signed app identity routes to the demo before all production UI
+  handlers. It has a separate executable name, so ordinary popup cleanup stays separate.
+- All simulation state is in memory. Not now, Later and failures change this session
+  only. No restart timer or retry is persisted. No production buttons are invoked.
+- This does not turn off an independently enabled production policy. Normal existing
+  PUSH monitoring is separate; the generic local-test client installer pauses it.
+- The temporary PUSH Demo menu is debug-only; it is not a second employee menu app.
+  Simulated progress is intentionally not written into JamfCheckIn's production state.
+
+LIVE OPTIONAL MAJOR OFFERS ARE NOT ENABLED YET
+This release implements the safe visual/debug flow first. It does not advertise,
+download or install a real optional major release. The live route still needs
+compatible/available installer discovery, managed authorization, trustworthy progress
+and verification of whether the chosen install route can wait for a restart choice.
+PUSH cannot bypass an MDM restriction simply by showing an offer. This module must
+remain separate from required macOS compliance/deadline enforcement.
+
+CUSTOM BRANDING
+The Admin embedded preview uses the draft's selected logo. The isolated native demo
+uses its bundled icon and sample text so it never needs your live config or assets.
+No production branding/config is changed just by previewing.
+
+VERIFICATION
+Offline model tests cover major-only version validation, explicit debug gating,
+invalid/live/config flags, download/preparation progression, pause/reset/skip,
+Not now, Keep working, failure states, Later and simulated Restart now.
+Release packaging checks cover the isolated identity/startup gate, universal builds,
+code signatures and both configured-builder modes with the added demo app.
+No popup, installer, upgrade or restart was executed during automated verification.
+Native visual/launch behavior remains for your own safe test.
+
+Local binaries are ad-hoc signed and installers unsigned. Production signing,
+notarization and managed pilot validation remain separate deployment work.
+
+HISTORICAL CLIENT/ADMIN REFERENCE — OLD VERSIONS SUPERSEDED ABOVE
+
 PUSH Client 1.9.1 / PUSH Admin 1.0.0 / JamfCheckIn 1.1.0
 Developer: Sebastian Santos
 Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS

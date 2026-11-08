@@ -1,0 +1,40 @@
+PUSH popup experience — Engine 1.11.0 / Admin 1.3.0 / JamfCheckIn 1.1.1
+Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
+
+WHAT CHANGED
+PUSH Admin has Major Upgrade (Debug) and Single Popups pages. Set popup width and height, banner text/image and a greeting such as Hello {fullName}. Supported tokens: {fullName}, {firstName}, {username}. Names resolve for the user viewing the popup, never the administrator building the installer. Imported banners are normalized PNGs. Window size is in points and is limited to the display. These presentation settings apply to the new major-offer demo and standalone notices; existing required-update windows retain their own layouts.
+
+PREVIEW AND PACKAGE
+Install PUSH-Admin-1.3.0.pkg on the administrator's Mac yourself, then open PUSH Admin. Use Major Upgrade (Debug) to edit the presentation and play the simulation. The app was built but not launched for you.
+In Deployment Export choose Full client or Major offer only (preview). Review the settings and build the package. The full profile includes the matching JamfCheckIn client. Both exclude PUSH Admin from endpoint installations.
+Major offer only contains the CLI, isolated major demo, isolated informational notice app, dedicated major-offer.json presentation config and Apple hardware catalog. It excludes JamfCheckIn, the normal required-update UI, launch jobs and MDM approval profiles. It installs a fresh paused/dry-run policy with live update requests disabled. Existing unrelated JamfCheckIn is not deleted. Installing this profile over a full PUSH installation replaces its reviewed YAML after backup and pauses PUSH monitors; use a dedicated pilot Mac. Previous credential/state data is preserved.
+The included ready-made major-only package uses default presentation settings and real Apple catalog data. Use Admin export to package your own banner/size/greeting.
+
+IMPORTANT: OPTIONAL UPGRADE IS STILL A SIMULATION
+The major-offer Update, download/progress, preparation and restart controls simulate the flow only. No live optional-upgrade request route is enabled. The package does not offer a production download/install/restart feature. Full PUSH retains its existing managed required-update workflow.
+Run the safe major preview yourself after installing its client (no sudo):
+/Library/Management/PUSH/push-cli major-offer --debug
+The demo is never started automatically at login or package installation.
+
+ONE-OFF POPUPS
+Use Single Popups to compose and preview an alert or toast, then Copy MDM command. These are Regina-inspired informational notices, with acknowledgement, close and timeout responses. No password/input collection or executable button commands were merged. Regina Pro.zip was not modified.
+Example, run yourself in the logged-in user's Terminal:
+/Library/Management/PUSH/push-cli notice --title "A message from IT" --message "Please save your work before leaving today." --kind alert --width 480 --height 440 --greeting 'Hello {fullName}' --timeout 60
+For a toast use --kind toast (default 420 x 320), with optional size overrides.
+The notice waits for a response. Exit 0 = acknowledgement, 2 = close/secondary button, 5 = timeout, 99 = preparation/launch failure, 101 = no logged-in desktop user. These are independent from existing upgrade popup button codes. All buttons are informational and never start an update.
+Root/MDM delivery uses the logged-in console user's session without a password prompt; with no logged-in desktop user it returns 101 and does not queue delivery. MDM delivery must be tested on your enrolled pilot. Custom banner images are deployed through the presentation package rather than embedded into copied command arguments.
+
+HARDWARE SUPPORT
+Read-only command, run yourself:
+/Library/Management/PUSH/push-cli hardware check --target 27 --popup
+It reads local model/device/board identifiers against the installed Apple catalog. --popup shows an unsupported or unverified result; supported results remain in Terminal. It does not download, install or restart anything.
+Admin can explicitly refresh Apple's public catalog. Fresh exact device matches establish support for the selected major family, not minimum build, installer availability, enrollment or upgrade authorization. Known devices absent from the target major list can be marked unsupported. The verified macOS 27 Intel-Mac exclusion uses Apple's compatibility page and a fresh target catalog. Unknown identities, missing lists, expired entries or catalogs older than 30 days stay unverified. No local hardware identity is uploaded in the catalog request.
+Full PUSH checks support before starting a major-upgrade download. A confirmed unsupported result records a non-retrying hardware failure, shows the informational warning when a user session is available and stops the attempt. Unverified results retain the existing platform/installer safeguards; they are not presented as confirmed support. This does not block supported minor/security updates on older Macs.
+Apple sources:
+https://gdmf.apple.com/v2/pmv
+https://www.apple.com/os/macos/
+https://support.apple.com/en-us/122867
+
+VERIFICATION AND LIMITS
+Universal arm64/x86_64 builds completed. Offline engine 387 checks, Admin 362 checks including full paused/full active/major-only package exports, JamfCheckIn 15 checks, plus a separate 354-check run that built the ready package using real Apple data. Installer contents, app identities/signatures, source parity, greeting templates and major-only exclusions were inspected. No GUI, installer, monitor, live hardware test, credential operation, upgrade or restart was executed for you. Native window rendering, interactive button behavior and managed-session delivery need your manual pilot check.
+Local apps are ad-hoc signed and packages are unsigned. Use your verified production signing/notarization before fleet distribution. Admin stays on administrator machines. Original Desktop projects and Regina ZIP were not overwritten.

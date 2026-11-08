@@ -140,6 +140,7 @@ struct ConfigDocument: Codable {
     var source = "# PUSH — configured with PUSH Admin\n# Developer: Sebastian Santos\n# Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS\n"
     var edits: [String:String] = [:]
     var sourceName = "New configuration"
+    var majorOfferSettings:MajorOfferSettings?=nil
     var logoImageData: Data? = nil
     var wallpaperAssets: [String:WallpaperAssetReference]? = nil
     var logoImageName: String? = nil
@@ -292,6 +293,7 @@ struct ConfigDocument: Codable {
         for key in ["compliance.nonCompliantWallpaper","compliance.compliantWallpaper"] {
             if let path=value(key),!path.isEmpty,!path.hasPrefix("/Library/Management/PUSH/") {errors.append("Wallpaper paths must be inside /Library/Management/PUSH. Use Wallpaper to stage a custom image.")}
         }
+        if let settings=majorOfferSettings {do{_=try settings.validated()}catch{errors.append(error.localizedDescription)}}
         return errors
     }
 }

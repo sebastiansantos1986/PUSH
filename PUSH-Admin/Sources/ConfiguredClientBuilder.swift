@@ -8,6 +8,17 @@ enum ClientActivation:String,CaseIterable,Identifiable {
     var id:String {rawValue}
     var title:String {self == .paused ? "Install with monitoring paused":"Start monitoring after installation"}
 }
+enum ClientPackageScope:String,CaseIterable,Identifiable {
+    case full,majorOfferOnly
+    var id:String {rawValue}
+    var title:String {self == .full ? "Full PUSH client + JamfCheckIn":"Major offer only (preview)"}
+    static var majorPolicy:ConfigDocument {
+        var value=ConfigDocument.fresh
+        for key in ["auto.enabled","auto.trackLatest","update.allowUserUpdateRequests","apps.enabled","entra.enabled","uptime.enabled","compliance.wallpaperEnabled","update.autoInstallAfterDeadline","update.silentInstallAfterDeadline","update.forceRestartAfterInstall","auto.autoInstallNonSystemUpdates"] {value.edits[key]="false"}
+        value.edits["debug.dryRun"]="true";value.edits["ui.menuBarEnabled"]="false"
+        return value
+    }
+}
 enum ConfiguredClientBuilder {
     static func validate(_ document:ConfigDocument,activation:ClientActivation)throws {
         guard document.setupIssues.isEmpty else {throw DeploymentBundleError.invalid("Resolve the setup validation issues before building: "+document.setupIssues.joined(separator:"; "))}
@@ -38,7 +49,7 @@ enum ConfiguredClientBuilder {
             guard values.isSymbolicLink != true,allowed.contains(where:{relative==$0 || relative.hasPrefix($0+"/") || (values.isDirectory==true && $0.hasPrefix(relative+"/"))}) else {throw DeploymentBundleError.invalid("The embedded client contains an unexpected payload path. Reinstall the matching Admin release.")}
         }
     }
-    static func preinstall(assetPaths:[String])->String {
+    static func preinstall(assetPaths:[String],includeJamf:Bool=true)->String {
         let managedPaths=(["config.yaml"]+assetPaths).map{"\"$base/"+$0+"\""}.joined(separator:" ")
         return """
         #!/bin/bash
@@ -56,7 +67,7 @@ enum ConfiguredClientBuilder {
         done
         scripts="$(cd "$(dirname "$0")" && pwd)"
         /bin/bash "$scripts/engine-preinstall" "$@"
-        /bin/bash "$scripts/jamf-preinstall" "$@"
+        \(includeJamf ? "/bin/bash \"$scripts/jamf-preinstall\" \"$@\"":"# JamfCheckIn is not part of this package and is not stopped/replaced.")
         """+"\n"
     }
     static func postinstall(activation:ClientActivation,main:Bool,entra:Bool,yamlHash:String)->String {
@@ -113,10 +124,12 @@ enum ConfiguredClientBuilder {
         \(start)
         """+"\n"
     }
-    static func build(_ input:DeploymentBundleInput,client:URL,activation:ClientActivation,to destination:URL)throws {
+    static func build(_ input:DeploymentBundleInput,client:URL,activation:ClientActivation,scope:ClientPackageScope = .full,to destination:URL)throws {
         let fm=FileManager.default
         let document=ConfigDocument.load(input.yaml,name:"Reviewed package policy")
         guard document.omittedCredentials==0 else {throw DeploymentBundleError.invalid("Remove plaintext credential fields before packaging.")}
+        guard scope != .majorOfferOnly || activation == .paused else {throw DeploymentBundleError.invalid("Major-only live upgrade activation is not enabled. Choose paused preview mode.")}
+        if scope == .majorOfferOnly {guard input.majorSettings != nil else {throw DeploymentBundleError.invalid("Include the dedicated major-offer presentation config.")};guard !document.setupFlag("auto.enabled"),document.setupFlag("debug.dryRun"),!document.setupFlag("apps.enabled"),!document.setupFlag("entra.enabled"),!document.setupFlag("uptime.enabled") else {throw DeploymentBundleError.invalid("Use the isolated major-only policy.")}}
         try validate(document,activation:activation)
         guard !fm.fileExists(atPath:destination.path) else {throw DeploymentBundleError.invalid("Choose a new package export folder. Existing builds are never replaced.")}
         let stage=destination.deletingLastPathComponent().appendingPathComponent(".push-build-"+UUID().uuidString)
@@ -126,12 +139,12 @@ enum ConfiguredClientBuilder {
         let expanded=stage.appendingPathComponent("expanded")
         try command("/usr/sbin/pkgutil",["--expand-full",client.path,expanded.path],folder:stage)
         let engine=expanded.appendingPathComponent("push-engine.pkg"),jamf=expanded.appendingPathComponent("jamfcheckin.pkg")
-        for (component,identifier,version) in [(engine,"com.push.pkg","1.9.1"),(jamf,"com.sebastianitconsulting.jamfcheckin.pkg","1.1.0")] {
+        for (component,identifier,version) in [(engine,"com.push.pkg","1.11.0"),(jamf,"com.sebastianitconsulting.jamfcheckin.pkg","1.1.1")] {
             let info=try String(contentsOf:component.appendingPathComponent("PackageInfo"),encoding:.utf8)
             guard info.contains("identifier=\""+identifier+"\""),info.contains("version=\""+version+"\"") else {throw DeploymentBundleError.invalid("The embedded client versions do not match this builder.")}
         }
         let enginePayload=engine.appendingPathComponent("Payload"),jamfPayload=jamf.appendingPathComponent("Payload")
-        try checkPayload(enginePayload,allowed:["Library/Management/PUSH/push-cli","Library/Management/PUSH/push-ui.app","Library/Management/PUSH/Local-Test","Library/Management/PUSH/assets","Library/Management/PUSH/user-request-protocol.json"])
+        try checkPayload(enginePayload,allowed:["Library/Management/PUSH/push-cli","Library/Management/PUSH/push-ui.app","Library/Management/PUSH/Local-Test","Library/Management/PUSH/assets","Library/Management/PUSH/user-request-protocol.json","Library/Management/PUSH/PUSH Major Upgrade Demo.app","Library/Management/PUSH/PUSH Notices.app"])
         try checkPayload(jamfPayload,allowed:["Applications/JamfCheckIn.app","Library/LaunchAgents/com.sebastianitconsulting.jamfcheckin.plist"])
         guard !fm.fileExists(atPath:enginePayload.appendingPathComponent("Library/Management/PUSH/PUSH Status.app").path) else {throw DeploymentBundleError.invalid("Use the client release that retires the standalone status menu.")}
         if document.setupFlag("uptime.enabled") {
@@ -139,11 +152,13 @@ enum ConfiguredClientBuilder {
             guard let reviewed=input.restartIdentity,identity.teamID==reviewed.teamID,identity.requirement==reviewed.requirement,identity.sha256==reviewed.sha256 else {throw DeploymentBundleError.invalid("The client's signed executable does not match the selected restart approval. Use the matching signed production client, or disable uptime enforcement for local testing.")}
         }
         let readme="""
-        PUSH Configured Client — built with PUSH Admin 1.1.0
+        PUSH Configured Client — built with PUSH Admin 1.3.0
         Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
 
-        INSTALL ONE PACKAGE: PUSH-Configured-Client.pkg
-        Includes PUSH 1.9.1, JamfCheckIn 1.1.0, the reviewed YAML and all staged images.
+        Package contents: \(scope.title)
+        INSTALL ONE PACKAGE: \(scope == .full ? "PUSH-Configured-Client.pkg":"PUSH-Major-Offer-Only.pkg")
+        \(scope == .majorOfferOnly ? "Major-only preview excludes JamfCheckIn and required-policy UI/schedules. Live optional upgrades remain disabled. Existing unrelated JamfCheckIn is not deleted.":"Full client includes JamfCheckIn and standard PUSH components.")
+        Includes the selected profile, reviewed YAML and dedicated major-offer.json presentation settings. The major-only profile excludes JamfCheckIn and full enforcement UI.
         PUSH Admin is excluded. The reviewed YAML REPLACES installed policy after backup.
         Previous state, credentials and runtime data are preserved by the client scripts.
         Selected mode: \(activation.title).
@@ -151,11 +166,9 @@ enum ConfiguredClientBuilder {
 
         PolicyPayload contains the reviewed configuration/images for inspection only;
         it is already inside the installer. Do not install another policy package.
-        Deploy Profiles through MDM before installing on the approved pilot group.
+        \(scope == .full ? "Deploy the included Profiles through MDM before installing on the approved pilot group." : "This preview profile includes no MDM approval profiles or background monitors.")
         A package cannot install the MDM-only privacy/background approvals or enroll a Mac.
-        Optional dependencies (Mist, protected Installomator, supported Self Service,
-        Company Portal and managed upgrade authorization) remain separate managed
-        prerequisites when selected. The setup suggestions identify those requirements.
+        \(scope == .full ? "Optional dependencies (Mist, protected Installomator, supported Self Service, Company Portal and managed upgrade authorization) remain separate managed prerequisites when selected. The setup suggestions identify those requirements." : "The major-offer simulation requires no Mist download, upgrade credential or managed enrollment. It cannot perform a live upgrade.")
         Local binaries are ad-hoc signed; this generated installer is unsigned. Use
         verified Developer ID signing and notarization before fleet rollout. Repackaging
         signed apps preserves their signatures; the new package still needs installer signing.
@@ -177,8 +190,11 @@ enum ConfiguredClientBuilder {
         """+"\n"
         let payload=stage.appendingPathComponent("payload")
         try command("/usr/bin/ditto",[enginePayload.path,payload.path],folder:stage)
-        try command("/usr/bin/ditto",[jamfPayload.path,payload.path],folder:stage)
+        if scope == .full {try command("/usr/bin/ditto",[jamfPayload.path,payload.path],folder:stage)}
         let base=payload.appendingPathComponent("Library/Management/PUSH")
+        if scope == .majorOfferOnly {try fm.removeItem(at:base.appendingPathComponent("push-ui.app"))}
+        if let catalog=input.hardwareCatalog {let folder=base.appendingPathComponent("assets/hardware");try fm.createDirectory(at:folder,withIntermediateDirectories:true);try JSONEncoder().encode(catalog).write(to:folder.appendingPathComponent("AppleHardwareCatalog.json"))}
+        if let settings=input.majorSettings {try JSONEncoder().encode(try settings.validated()).write(to:base.appendingPathComponent("major-offer.json"),options:.atomic)}
         try Data(input.yaml.utf8).write(to:base.appendingPathComponent("config.yaml"),options:.atomic)
         try Data(readme.utf8).write(to:base.appendingPathComponent("Local-Test/INSTALL-AND-TEST.txt"),options:.atomic)
         for (path,data) in input.assets {let file=base.appendingPathComponent(path);try fm.createDirectory(at:file.deletingLastPathComponent(),withIntermediateDirectories:true);try data.write(to:file,options:.atomic)}
@@ -190,6 +206,13 @@ enum ConfiguredClientBuilder {
         }
         let scripts=stage.appendingPathComponent("scripts");try fm.createDirectory(at:scripts,withIntermediateDirectories:false)
         for (source,name) in [(engine.appendingPathComponent("Scripts/preinstall"),"engine-preinstall"),(engine.appendingPathComponent("Scripts/postinstall"),"engine-postinstall"),(jamf.appendingPathComponent("Scripts/preinstall"),"jamf-preinstall")] {try fm.copyItem(at:source,to:scripts.appendingPathComponent(name))}
+        if scope == .majorOfferOnly {
+            try fm.removeItem(at:scripts.appendingPathComponent("jamf-preinstall"))
+            let post=scripts.appendingPathComponent("engine-postinstall")
+            let text=try String(contentsOf:post,encoding:.utf8)
+            try text.replacingOccurrences(of:" \"$base/push-ui.app\"",with:"").write(to:post,atomically:true,encoding:.utf8)
+            try fm.removeItem(at:bundle.appendingPathComponent("Profiles"))
+        }
         if activation == .monitor {
             for (name,label,args) in [("main","com.push.autoupdate",["auto-check","--scheduled"]),("entra","com.push.entra-registration",["entra","scheduled","--from-daemon"])] {
                 let plist:[String:Any]=["Label":label,"ProgramArguments":["/Library/Management/PUSH/push-cli"]+args,"RunAtLoad":false,"StartInterval":300,"KeepAlive":false,"ProcessType":"Background","StandardOutPath":"/Library/Management/PUSH/logs/"+name+"-monitor.log","StandardErrorPath":"/Library/Management/PUSH/logs/"+name+"-monitor.log"]
@@ -197,21 +220,21 @@ enum ConfiguredClientBuilder {
             }
         }
         let yamlHash=DeploymentBundle.digest(Data(input.yaml.utf8))
-        for (name,text) in [("preinstall",preinstall(assetPaths:input.assets.keys.sorted())),("postinstall",postinstall(activation:activation,main:document.setupFlag("auto.enabled"),entra:document.setupFlag("entra.enabled"),yamlHash:yamlHash))] {try Data(text.utf8).write(to:scripts.appendingPathComponent(name));try fm.setAttributes([.posixPermissions:0o755],ofItemAtPath:scripts.appendingPathComponent(name).path)}
+        for (name,text) in [("preinstall",preinstall(assetPaths:input.assets.keys.sorted(),includeJamf:scope == .full)),("postinstall",postinstall(activation:activation,main:document.setupFlag("auto.enabled"),entra:document.setupFlag("entra.enabled"),yamlHash:yamlHash))] {try Data(text.utf8).write(to:scripts.appendingPathComponent(name));try fm.setAttributes([.posixPermissions:0o755],ofItemAtPath:scripts.appendingPathComponent(name).path)}
         let components=stage.appendingPathComponent("components.plist")
         try command("/usr/bin/pkgbuild",["--analyze","--root",payload.path,components.path],folder:stage)
-        guard var componentList=try PropertyListSerialization.propertyList(from:Data(contentsOf:components),format:nil) as? [[String:Any]],componentList.count==2 else {throw DeploymentBundleError.invalid("The client must contain exactly the PUSH popup and JamfCheckIn app bundles.")}
+        guard var componentList=try PropertyListSerialization.propertyList(from:Data(contentsOf:components),format:nil) as? [[String:Any]],componentList.count==(scope == .full ? 4:2) else {throw DeploymentBundleError.invalid("The client must contain the PUSH popup, isolated debug demo and JamfCheckIn app bundles.")}
         for i in componentList.indices {componentList[i]["BundleIsRelocatable"]=false;componentList[i]["BundleIsVersionChecked"]=false}
         try PropertyListSerialization.data(fromPropertyList:componentList,format:.xml,options:0).write(to:components)
-        let package=bundle.appendingPathComponent("PUSH-Configured-Client.pkg")
-        try command("/usr/bin/pkgbuild",["--root",payload.path,"--component-plist",components.path,"--scripts",scripts.path,"--ownership","recommended","--identifier","com.push.configured.client","--version","1.9.1","--install-location","/",package.path],folder:stage)
-        for name in ["PUSH-Client-1.9.1.pkg","Build-Policy-Package.command","Enable-Monitor.sh"] {try fm.removeItem(at:bundle.appendingPathComponent(name))}
+        let package=bundle.appendingPathComponent(scope == .full ? "PUSH-Configured-Client.pkg":"PUSH-Major-Offer-Only.pkg")
+        try command("/usr/bin/pkgbuild",["--root",payload.path,"--component-plist",components.path,"--scripts",scripts.path,"--ownership","recommended","--identifier",scope == .full ? "com.push.configured.client":"com.push.major-offer.client","--version","1.11.0","--install-location","/",package.path],folder:stage)
+        for name in ["PUSH-Client-1.11.0.pkg","Build-Policy-Package.command","Enable-Monitor.sh"] {try fm.removeItem(at:bundle.appendingPathComponent(name))}
         try Data(readme.utf8).write(to:bundle.appendingPathComponent("READ-ME-FIRST.txt"),options:.atomic)
         // Replace the baseline manifest after replacing its separate-package workflow.
         try fm.removeItem(at:bundle.appendingPathComponent("manifest.json"))
         var files:[[String:String]]=[]
-        for case let file as URL in fm.enumerator(at:bundle,includingPropertiesForKeys:[.isRegularFileKey])! {if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {files.append(["path":String(file.path.dropFirst(bundle.path.count+1)),"sha256":DeploymentBundle.digest(try Data(contentsOf:file))])}}
-        let manifest:[String:Any]=["formatVersion":2,"developer":"Sebastian Santos","adminVersion":"1.1.0","clientVersion":"1.9.1","activation":activation.rawValue,"yamlSHA256":yamlHash,"sourceClientSHA256":DeploymentBundle.digest(try Data(contentsOf:client)),"adminIncludedOnClients":false,"signing":"Unsigned generated installer; verify production signing/notarization separately","files":files.sorted{$0["path"]!<$1["path"]!}]
+        for case let file as URL in fm.enumerator(at:bundle,includingPropertiesForKeys:[.isRegularFileKey])! {if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {files.append(["path":try DeploymentBundle.relativePath(file,to:bundle),"sha256":DeploymentBundle.digest(try Data(contentsOf:file))])}}
+        let manifest:[String:Any]=["formatVersion":2,"developer":"Sebastian Santos","adminVersion":"1.3.0","clientVersion":"1.11.0","scope":scope.rawValue,"majorOfferIsSimulationOnly":true,"activation":activation.rawValue,"yamlSHA256":yamlHash,"sourceClientSHA256":DeploymentBundle.digest(try Data(contentsOf:client)),"adminIncludedOnClients":false,"signing":"Unsigned generated installer; verify production signing/notarization separately","files":files.sorted{$0["path"]!<$1["path"]!}]
         try JSONSerialization.data(withJSONObject:manifest,options:[.prettyPrinted,.sortedKeys]).write(to:bundle.appendingPathComponent("manifest.json"))
         try fm.moveItem(at:bundle,to:destination)
     }

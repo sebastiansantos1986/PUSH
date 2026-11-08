@@ -3,10 +3,11 @@
 import Foundation
 
 enum RecoveryFailureKind:String,Codable {
-    case power,disk,network,download,installer,authorization,verification,state
-    var allowsAutomaticRetry:Bool {![Self.authorization,.verification,.state].contains(self)}
+    case power,disk,network,download,installer,authorization,verification,state,hardware
+    var allowsAutomaticRetry:Bool {![Self.authorization,.verification,.state,.hardware].contains(self)}
     static func classify(_ message:String)->Self {
         let text=message.lowercased()
+        if text.contains("hardware is not supported") {return .hardware}
         if text.contains("authorization") || text.contains("secure token") || text.contains("credential") {return .authorization}
         if text.contains("gatekeeper") || text.contains("product version") || text.contains("signature") {return .verification}
         if text.contains("state") && text.contains("save") {return .state}

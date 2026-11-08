@@ -510,7 +510,7 @@ let fixtureClient=exportFixture.appendingPathComponent("fixture.pkg")
 try Data("OFFLINE FIXTURE — NOT AN INSTALLER".utf8).write(to:fixtureClient)
 let fixtureExport=exportFixture.appendingPathComponent("bundle")
 try DeploymentBundle.write(.init(yaml:ConfigDocument.fresh.yaml,assets:["assets/popup-logo.png":Data("fixture image".utf8)],teamID:""),client:fixtureClient,to:fixtureExport)
-check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PUSH-Client-1.9.1.pkg").path),"bundle includes the supplied client artifact")
+check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PUSH-Client-1.11.0.pkg").path),"bundle includes the supplied client artifact")
 check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PolicyPayload/Library/Management/PUSH/assets/popup-logo.png").path),"bundle stages images at their managed destinations")
 let exportManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:fixtureExport.appendingPathComponent("manifest.json"))) as! [String:Any]
 check(exportManifest["adminIncludedOnClients"] as? Bool == false,"manifest explicitly excludes the admin app from clients")
@@ -602,6 +602,106 @@ if let clientPath=ProcessInfo.processInfo.environment["PUSH_TEST_CLIENT"],let fo
     var rejectedInstallerCommand=false
     do {try ConfiguredClientBuilder.command("/usr/sbin/installer",[],folder:output)}catch{rejectedInstallerCommand=true}
     check(rejectedInstallerCommand,"builder command boundary rejects running an installer")
+}
+
+let majorSample=MajorUpgradeDemoOptions.sample
+check(majorSample.current=="26.0" && majorSample.target=="27.0","major demo uses explicitly illustrative version data")
+let parsedMajorDefault=try MajorUpgradeDemoOptions.parse(["--debug"])
+check(parsedMajorDefault == majorSample,"explicit debug flag enables only the sample parser")
+func rejectsMajorOptions(_ args:[String])->Bool {do {_ = try MajorUpgradeDemoOptions.parse(args);return false}catch{return true}}
+check(rejectsMajorOptions([]),"major offer cannot open a live path without explicit debug mode")
+check(rejectsMajorOptions(["--debug","--live"]) && rejectsMajorOptions(["--debug","--install"]),"live and installation flags are rejected by the debug command")
+check(rejectsMajorOptions(["--debug","--config","/Library/Management/PUSH/config.yaml"]),"demo parser cannot read a live config path")
+check(rejectsMajorOptions(["--debug","--from","27.0","--to","27.2"]),"minor updates cannot be offered by the major-only demo")
+check(rejectsMajorOptions(["--debug","--from","27.0","--to","26.0"]),"downgrades are rejected")
+check(rejectsMajorOptions(["--debug","--from","26.0","--to","27beta"]),"non-numeric example targets are rejected")
+check(rejectsMajorOptions(["--debug","--duration","nan"]) && rejectsMajorOptions(["--debug","--duration","0"]),"nonfinite and out-of-range demo timing cannot enter the state machine")
+check(rejectsMajorOptions(["--debug","--debug"]),"duplicate debug arguments do not change capabilities")
+let roundTripMajor=try MajorUpgradeDemoOptions.parse(majorSample.launchArguments)
+check(roundTripMajor==majorSample,"typed launch arguments preserve validated sample options")
+var majorFlow=MajorUpgradeSimulation()
+majorFlow.advance(seconds:100)
+check(majorFlow.phase == .offer,"time alone never accepts the optional offer")
+majorFlow.restartNow()
+check(majorFlow.phase == .offer,"restart cannot be selected before the ready stage")
+majorFlow.chooseUpdate();majorFlow.advance(seconds:5)
+check(majorFlow.phase == .downloading && majorFlow.progress>0 && majorFlow.progress<1,"Update begins simulated download progress")
+majorFlow.togglePause();let frozenProgress=majorFlow.progress;majorFlow.advance(seconds:5)
+check(majorFlow.progress==frozenProgress,"paused demo time does not advance progress")
+majorFlow.togglePause();majorFlow.advance(seconds:8)
+check(majorFlow.phase == .preparing,"one simulation changes from download into preparation")
+majorFlow.advance(seconds:7)
+check(majorFlow.phase == .restartReady,"preparation ends at a deliberate restart choice")
+majorFlow.restartLater();majorFlow.advance(seconds:1000)
+check(majorFlow.phase == .restartReady && majorFlow.message.contains("No real schedule"),"Later never starts an automatic or scheduled restart")
+majorFlow.restartNow()
+check(majorFlow.phase == .finished && majorFlow.message.contains("not restarted"),"Restart now completes the demo with a simulated result")
+majorFlow.reset();majorFlow.notNow();majorFlow.advance(seconds:120)
+check(majorFlow.phase == .declined,"Not now prevents all later simulated progress")
+majorFlow.reset();majorFlow.chooseUpdate();majorFlow.keepWorking();majorFlow.advance(seconds:1)
+check(majorFlow.phase == .downloading && majorFlow.progress>0,"Keep working continues the in-memory simulation")
+majorFlow.fail("Authorization is not configured")
+check(majorFlow.phase == .failed && majorFlow.message.contains("No system action"),"failure simulation cannot escalate into authentication or installation")
+majorFlow.advance(seconds:120)
+check(majorFlow.phase == .failed,"a failed demo does not retry automatically")
+majorFlow.reset();majorFlow.chooseUpdate();majorFlow.skipStage()
+check(majorFlow.phase == .preparing,"debug skip moves to preparation in the same state machine")
+majorFlow.skipStage()
+check(majorFlow.phase == .restartReady,"debug skip ends at ready rather than restarting")
+
+var personal=PopupPresentation()
+check(personal.greeting(fullName:"Sebastian Santos",username:"sebastian")=="Hello Sebastian Santos","greeting resolves the full name at display time")
+personal.greetingTemplate="Hello {firstName} ({username})"
+check(personal.greeting(fullName:"Sebastian Santos",username:"sebastian")=="Hello Sebastian (sebastian)","greeting tokens are plain substitutions, not executable templates")
+check(personal.greeting(fullName:"",username:"someone")=="Hello someone (someone)","missing directory name falls back to the local account")
+var badSize=personal;badSize.width=Double.nan
+var sizeRejected=false;do{_=try badSize.validated()}catch{sizeRejected=true}
+check(sizeRejected,"invalid/nonfinite window dimensions cannot reach the native window")
+var badBanner=personal;badBanner.bannerImage=Data("not a PNG".utf8)
+var bannerRejected=false;do{_=try badBanner.validated()}catch{bannerRejected=true}
+check(bannerRejected,"banner payloads must be normalized PNG data")
+let settingsWire=try JSONEncoder().encode(MajorOfferSettings())
+check(String(data:settingsWire,encoding:.utf8)!.contains("{fullName}") && !String(data:settingsWire,encoding:.utf8)!.contains("Sebastian Santos"),"packages store the greeting template rather than the admin's name")
+var noticeFixture=SinglePopupNotice(title:"IT message",message:"Literal text: $(do-not-execute)")
+noticeFixture.debug=true
+let noticeRoundTrip=try SinglePopupNotice.decode(noticeFixture.payload())
+check(noticeRoundTrip.message==noticeFixture.message && noticeRoundTrip.debug,"standalone notices preserve literal message text without shell evaluation")
+noticeFixture.style="unsupported-style"
+var badNotice=false;do{_=try noticeFixture.payload()}catch{badNotice=true}
+check(badNotice,"unsupported standalone notice styles fail validation")
+let hardwareNow=Date(timeIntervalSince1970:1_800_000_000)
+let currentList=AppleHardwareCatalog(fetchedAt:hardwareNow,releases:[.init(version:"27.0",posted:hardwareNow.addingTimeInterval(-86400),expires:hardwareNow.addingTimeInterval(86400),devices:["NEWBOARD"]),.init(version:"26.0",posted:hardwareNow.addingTimeInterval(-86400),expires:hardwareNow.addingTimeInterval(86400),devices:["OLDBOARD","NEWBOARD"])])
+check(currentList.assess(.init(model:"Example new Mac",deviceKeys:["newboard"]),target:"27.0",now:hardwareNow).state == .supported,"exact Apple device identifiers establish major-family support")
+check(currentList.assess(.init(model:"Example older Mac",deviceKeys:["OLDBOARD"]),target:"27",now:hardwareNow).state == .unsupported,"known older hardware absent from a fresh target list is unsupported for that major")
+check(currentList.assess(.init(model:"Unfamiliar Mac",deviceKeys:["FUTUREBOARD"]),target:"27",now:hardwareNow).state == .unknown,"unfamiliar hardware is not falsely labeled unsupported")
+check(currentList.assess(.init(model:"Example",deviceKeys:["NEWBOARD"]),target:"28",now:hardwareNow).state == .unknown,"unpublished major lists cannot create compatibility verdicts")
+check(currentList.assess(.init(model:"Example",deviceKeys:[]),target:"27",now:hardwareNow).state == .unknown,"missing device identity stays unverified")
+check(currentList.assess(.init(model:"MacBookPro16,1",deviceKeys:[],appleSilicon:false),target:"27",now:hardwareNow).state == .unknown,"missing identities do not become a generic CPU-only verdict")
+check(currentList.assess(.init(model:"MacBookPro16,1",deviceKeys:["UNMAPPED-INTEL"],appleSilicon:false),target:"27",now:hardwareNow).state == .unsupported,"Apple's major-27 Apple-silicon requirement covers a verified Intel Mac family")
+check(currentList.assess(.init(model:"Unknown PC",deviceKeys:["UNMAPPED"],appleSilicon:false),target:"27",now:hardwareNow).state == .unknown,"unknown non-Mac identities are not classified by the Intel Mac rule")
+check(currentList.assess(.init(model:"Example",deviceKeys:["NEWBOARD"]),target:"27",now:hardwareNow.addingTimeInterval(31*86400)).state == .unknown,"expired/stale Apple evidence is never reported as current support")
+var futureCatalog=currentList;futureCatalog.fetchedAt=hardwareNow.addingTimeInterval(1000)
+check(futureCatalog.assess(.init(model:"Example",deviceKeys:["NEWBOARD"]),target:"27",now:hardwareNow).state == .unknown,"future-dated catalog metadata fails closed")
+check(!RecoveryFailureKind.hardware.allowsAutomaticRetry,"unsupported hardware cannot get an automatic install retry countdown")
+
+if let clientPath=ProcessInfo.processInfo.environment["PUSH_TEST_CLIENT"],let folder=ProcessInfo.processInfo.environment["PUSH_TEST_BUILD_FOLDER"] {
+    let output=URL(fileURLWithPath:folder).appendingPathComponent("major-only")
+    let input=DeploymentBundleInput(yaml:ClientPackageScope.majorPolicy.yaml,assets:[:],teamID:"",majorSettings:MajorOfferSettings(),hardwareCatalog:currentList)
+    try ConfiguredClientBuilder.build(input,client:URL(fileURLWithPath:clientPath),activation:.paused,scope:.majorOfferOnly,to:output)
+    check(FileManager.default.fileExists(atPath:output.appendingPathComponent("PUSH-Major-Offer-Only.pkg").path),"major-only profile builds its dedicated installer")
+    let majorManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:output.appendingPathComponent("manifest.json"))) as! [String:Any]
+    check(majorManifest["scope"] as? String == "majorOfferOnly" && majorManifest["majorOfferIsSimulationOnly"] as? Bool == true,"major-only manifest reports its scope and preview limitation")
+    check(!FileManager.default.fileExists(atPath:output.appendingPathComponent("Profiles").path),"major-only profile excludes unrelated Jamf/background permission profiles")
+    let preference=try JSONDecoder().decode(MajorOfferSettings.self,from:Data(contentsOf:output.appendingPathComponent("PolicyPayload/Library/Management/PUSH/major-offer.json")))
+    check(preference.presentation.greetingTemplate=="Hello {fullName}","major-only installer includes the runtime-resolved greeting template")
+    check(!ClientPackageScope.majorPolicy.setupFlag("auto.enabled") && ClientPackageScope.majorPolicy.setupFlag("debug.dryRun") && !ClientPackageScope.majorPolicy.setupFlag("update.allowUserUpdateRequests"),"major-only policy disables enforcement and live update requests")
+}
+
+if let clientPath=ProcessInfo.processInfo.environment["PUSH_READY_CLIENT"],let catalogPath=ProcessInfo.processInfo.environment["PUSH_READY_CATALOG"],let folder=ProcessInfo.processInfo.environment["PUSH_READY_FOLDER"] {
+    let catalog=try JSONDecoder().decode(AppleHardwareCatalog.self,from:Data(contentsOf:URL(fileURLWithPath:catalogPath)))
+    let input=DeploymentBundleInput(yaml:ClientPackageScope.majorPolicy.yaml,assets:[:],teamID:"",majorSettings:MajorOfferSettings(),hardwareCatalog:catalog)
+    try ConfiguredClientBuilder.build(input,client:URL(fileURLWithPath:clientPath),activation:.paused,scope:.majorOfferOnly,to:URL(fileURLWithPath:folder))
+    check(catalog.source=="https://gdmf.apple.com/v2/pmv" && !catalog.releases.isEmpty,"ready package uses the actual normalized Apple catalog")
 }
 
 print("Passed \(checks) offline checks. No app, Mist query, Keychain operation, admin action, upgrade, or restart was executed.")

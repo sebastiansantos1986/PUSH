@@ -1,0 +1,50 @@
+{
+  "developer": "Sebastian Santos",
+  "engineVersion": "1.11.0",
+  "adminVersion": "1.3.0",
+  "jamfVersion": "1.1.1",
+  "offlineChecks": {
+    "engine": 387,
+    "adminWithAllPackageProfiles": 362,
+    "jamf": 15,
+    "adminWithRealApplePackage": 354
+  },
+  "majorOfferLiveUpgradeEnabled": false,
+  "installedOrLaunched": false,
+  "majorOnlyExcludes": [
+    "PUSH Admin",
+    "JamfCheckIn",
+    "push-ui",
+    "launch jobs",
+    "MDM profiles"
+  ],
+  "hardwareCatalogSource": "https://gdmf.apple.com/v2/pmv",
+  "verifiedApps": [
+    {
+      "app": "PUSH Major Upgrade Demo.app",
+      "architectures": "x86_64 arm64",
+      "signature": "verified ad-hoc"
+    },
+    {
+      "app": "PUSH Notices.app",
+      "architectures": "x86_64 arm64",
+      "signature": "verified ad-hoc"
+    },
+    {
+      "app": "PUSH Major Upgrade Demo.app",
+      "architectures": "x86_64 arm64",
+      "signature": "verified ad-hoc"
+    },
+    {
+      "app": "PUSH Notices.app",
+      "architectures": "x86_64 arm64",
+      "signature": "verified ad-hoc"
+    }
+  ],
+  "adminApp": {
+    "version": "1.3.0",
+    "architectures": "x86_64 arm64",
+    "signature": "verified ad-hoc",
+    "embeddedClientMatches": true
+  }
+}

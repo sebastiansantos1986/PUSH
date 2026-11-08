@@ -17,5 +17,5 @@ chmod 755 "$stage/scripts/preinstall"
 pkgbuild --analyze --root "$stage/payload" "$stage/components.plist"
 plutil -replace 0.BundleIsRelocatable -bool NO "$stage/components.plist"
 plutil -replace 0.BundleIsVersionChecked -bool NO "$stage/components.plist"
-pkgbuild --root "$stage/payload" --component-plist "$stage/components.plist" --scripts "$stage/scripts" --ownership recommended --identifier com.sebastianitconsulting.jamfcheckin.pkg --version 1.1.0 --install-location / "$output"
+pkgbuild --root "$stage/payload" --component-plist "$stage/components.plist" --scripts "$stage/scripts" --ownership recommended --identifier com.sebastianitconsulting.jamfcheckin.pkg --version 1.1.1 --install-location / "$output"
 echo 'Built JamfCheckIn client component. Nothing launched or installed.'
