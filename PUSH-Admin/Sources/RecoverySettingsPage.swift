@@ -17,11 +17,11 @@ struct RecoverySettingsPage:View {
             VStack(alignment:.leading,spacing:22) {
                 PageHeading(eyebrow:"User status & recovery",title:"Explain the problem. Make the next step clear.",subtitle:"Configure the menu-bar status and guarded retries after a missed deadline. This page changes a draft only.")
                 AdminCard {
-                    Toggle("Show PUSH status inside JamfCheckIn",isOn:flag("ui.menuBarEnabled"))
+                    Toggle("Show PUSH status in an existing JamfCheckIn installation",isOn:flag("ui.menuBarEnabled"))
                     Toggle("Allow users to request the configured update",isOn:flag("update.allowUserUpdateRequests"))
                     Text("JamfCheckIn runs without root privileges. It reads saved local status and queues typed requests; the privileged worker revalidates the target, user, policy and safety conditions. A queued request is not an installation success.").font(.callout).foregroundStyle(.secondary)
                     Button("Open JamfCheckIn"){NSWorkspace.shared.open(URL(fileURLWithPath:"/Applications/JamfCheckIn.app"))}.disabled(!FileManager.default.fileExists(atPath:"/Applications/JamfCheckIn.app"))
-                    Text("The client login agent opens JamfCheckIn at future graphical logins. This setting controls its PUSH card; other JamfCheckIn features remain available.").font(.caption).foregroundStyle(.secondary)
+                    Text("JamfCheckIn is not installed or launched by this release. This setting controls the PUSH card only if you deployed JamfCheckIn separately.").font(.caption).foregroundStyle(.secondary)
                 }
                 AdminCard {
                     Toggle("Enable deadline failure recovery",isOn:flag("update.deadlineRecoveryEnabled"))

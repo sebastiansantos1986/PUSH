@@ -324,7 +324,7 @@ func launchUIAsUser(_ cmd: String) {
 
     if !appBundle.isEmpty && appBundle.hasSuffix(".app") {
         // Launch via open -a so macOS properly connects it to the user's session
-        let openCmd = "launchctl asuser \(user.uid) /usr/bin/open -a \"\(appBundle)\" --args \(openArgs) > /dev/null 2>&1 &"
+        let openCmd = "launchctl asuser \(user.uid) /usr/bin/sudo -n -u "+shellArgument(user.name)+" -- /usr/bin/open -n "+shellArgument(appBundle)+" --args \(openArgs) > /dev/null 2>&1 &"
         cliLog("[UI] open command: \(openCmd)")
         shell(openCmd)
     } else {
@@ -342,6 +342,7 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15, onDisplayed: (() -> 
     let fm = FileManager.default
     let session = URL(fileURLWithPath:"/private/tmp/push-ui-session-" + UUID().uuidString)
     let ready = session.appendingPathComponent("ready")
+    let resultFile = session.appendingPathComponent("result")
     let log = session.appendingPathComponent("output")
     do {
         try fm.createDirectory(at:session,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
@@ -352,10 +353,11 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15, onDisplayed: (() -> 
     guard fm.createFile(atPath:log.path,contents:nil,attributes:[.posixPermissions:0o600]),
           let output = try? FileHandle(forUpdating:log) else { return audit.finish(99) }
     defer { try? output.close() }
+    if getuid()==0 {do{try fm.setAttributes([.ownerAccountID:NSNumber(value:user.uid)],ofItemAtPath:log.path)}catch{return audit.finish(99)}}
     let process = Process()
     process.executableURL = URL(fileURLWithPath:"/bin/launchctl")
-    let command = cmd + " --ready-file " + shellArgument(ready.path)
-    process.arguments = ["asuser",String(user.uid),"/usr/bin/sudo","-n","-u",user.name,"--","/bin/zsh","-c","exec " + command]
+    guard let command=PopupLaunchProtocol.openCommand(command:cmd,binary:resolveUIBinary(),ready:ready.path,result:resultFile.path,output:log.path) else {cliLog("[UI] Refused an unrecognized popup launch command");return audit.finish(99)}
+    process.arguments = ["asuser",String(user.uid),"/usr/bin/sudo","-n","-u",user.name,"--","/bin/zsh","-c",command]
     process.standardOutput = output; process.standardError = output
     process.standardInput = FileHandle.nullDevice
     do { try process.run() } catch { cliLog("[UI] Could not start GUI session process: \(error.localizedDescription)"); return audit.finish(99) }
@@ -376,11 +378,15 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15, onDisplayed: (() -> 
         if process.isRunning { kill(process.processIdentifier,SIGKILL) }
         process.waitUntilExit()
     }
+    cliLog("[UI] LaunchServices request started; waiting for window acknowledgement")
     RuntimeHealthScope.phase("openingPrompt","Opening a PUSH prompt")
     let startup = Date().addingTimeInterval(20)
     let timeout = Date().addingTimeInterval(TimeInterval(timeoutMinutes * 60))
     var visible = false
-    while process.isRunning {
+    var recordedLauncherExit=false
+    // Do not tie this loop to open's lifetime. open -n returns before the UI
+    // responds, and open -W can fail to identify a just-launched process.
+    while true {
         if !visible && fm.fileExists(atPath:ready.path) {
             visible = true
             audit.displayed()
@@ -388,25 +394,22 @@ func runUIBlocking(_ cmd: String, timeoutMinutes: Int = 15, onDisplayed: (() -> 
             RuntimeHealthScope.phase("waitingForUser","Waiting for a response to the visible PUSH prompt")
             cliLog("[UI] Window reported visible in the console session")
         }
-        if !visible && Date() >= startup {
-            stop(); diagnostic()
-            cliLog("[UI] Window did not report visible within 20 seconds")
-            return audit.finish(103)
+        var receipt:Int32?
+        if let properties=try? resultFile.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey,.fileSizeKey]),properties.isRegularFile==true,properties.isSymbolicLink != true,(properties.fileSize ?? Int.max)<=4096,
+           let bytes=try? Data(contentsOf:resultFile) {receipt=PopupResultReceipt.decode(bytes,session:session.lastPathComponent)}
+        let launcherExited = !process.isRunning
+        if launcherExited && !recordedLauncherExit {recordedLauncherExit=true;cliLog("[UI] Launcher exited with status \(process.terminationStatus); waiting for the popup receipt independently")}
+        let launcherFailed=launcherExited && (process.terminationReason != .exit || process.terminationStatus != 0)
+        let decision=PopupSessionPolicy.decision(visible:visible,receipt:receipt,launcherFailure:launcherFailed,startupExpired:Date()>=startup,responseExpired:Date()>=timeout)
+        if case .finish(let code)=decision {
+            stop()
+            if !visible {diagnostic();cliLog("[UI] No visible-window acknowledgement; controller result \(code)")}
+            else if code==100 {cliLog("[UI] No user response before timeout")}
+            else {cliLog("[UI] Popup response receipt: \(code)")}
+            return audit.finish(code)
         }
-        if Date() >= timeout { stop(); diagnostic(); cliLog("[UI] No user response before timeout"); return audit.finish(100) }
         Thread.sleep(forTimeInterval:0.1)
     }
-    process.waitUntilExit()
-    let reportedVisible = visible || fm.fileExists(atPath:ready.path)
-    let result = popupWindowResult(status:process.terminationStatus,reason:process.terminationReason,visible:reportedVisible)
-    guard reportedVisible else {
-        diagnostic()
-        cliLog("[UI] Child exited before reporting a visible window (status \(result))")
-        return audit.finish(103)
-    }
-    if reportedVisible {if !visible {onDisplayed?()};audit.displayed()}
-    if result != 0 { diagnostic() }
-    return audit.finish(result)
 }
 
 // MARK: - push-ui path resolver

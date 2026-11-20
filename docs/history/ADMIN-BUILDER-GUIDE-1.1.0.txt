@@ -1,0 +1,105 @@
+PUSH Admin 1.1.0 — Complete Client Builder and Setup Suggestions
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+ON YOUR IT MAC
+1. Install PUSH-Admin-1.1.0.pkg yourself, then open /Applications/PUSH Admin.app.
+   This installs only the admin console; it does not install/activate the client.
+2. Open Guided Setup. Import existing YAML if desired, or start a new safe draft.
+   Setup suggestions appear at the start/review steps and on Deployment. Every
+   suggested change lists its exact settings and requires Apply to Draft.
+3. Add your support contact and branding. Preview popups without real actions.
+4. Open Deployment > Build the complete client installer. Choose the installation
+   mode, review the summary and select a NEW output folder.
+5. Deploy PUSH-Configured-Client.pkg from that folder to your pilot Macs. It includes
+   PUSH 1.9.1, JamfCheckIn 1.1.0, the reviewed YAML and all staged custom images.
+   Employee computers do not receive PUSH Admin or a second menu-bar app.
+
+TWO INSTALLATION MODES
+Install with monitoring paused: suitable for inspection/pilot setup. The configured
+YAML/assets are installed, but PUSH scheduling stays off until deliberately enabled.
+
+Start monitoring after installation: requires dry-run off and an enabled macOS or
+registration policy. This is an explicit build/review choice. Future installation
+loads the selected five-minute schedules with RunAtLoad OFF; their first checks wait
+five minutes. Later live checks can notify users, download/install updates and restart
+under the reviewed policy. Building this package does none of those things.
+
+Activation results are saved at /Library/Management/PUSH/configured-activation.json.
+A failed bootstrap can leave the client installed but monitoring paused or partly
+loaded; review Readiness and installer logs. Loaded services do not prove authorization
+or a successful OS installation. Background intervals can be delayed by sleep/session
+conditions. Ordinary toast timing stays independent, normally once per hour.
+
+POLICY REPLACEMENT IS INTENTIONAL
+Unlike the generic client installer, this configured package REPLACES installed YAML
+with the reviewed draft, after the existing client preflight/backups. Old state,
+credentials and runtime data are preserved. The old standalone PUSH Status menu is
+retired; JamfCheckIn is the menu app. JamfCheckIn starts at the next graphical login,
+or the user may open /Applications/JamfCheckIn.app after installing.
+
+The package verifies that the installed YAML matches the reviewed hash before any
+monitor activation. Both PUSH and JamfCheckIn backup preflights are retained. Unsafe
+policy/image symlinks stop replacement. The original Desktop projects are untouched.
+
+WHAT THE SUGGESTIONS DO
+- Recommend automatic stable minor-release tracking, hourly toasts and seven/fourteen
+  day release deadlines. No repeated version-number edits are needed with tracking.
+- Identify reminder-hour restrictions and non-hourly intervals that can explain gaps.
+- Explain explicit YAML deadline overrides, including expired ones. Clearing an
+  override is always an individual choice; suggested defaults retain it.
+- Flag missing support contacts, cached/stale catalog information, beta/major-upgrade
+  choices, missing dependency evidence and unattended-authorization requirements.
+- Identify third-party provider, registration and optional restart-approval needs.
+
+Suggestions are deterministic checks of the draft and saved local evidence. They do
+not infer the state of every client from the admin workstation. Recommended defaults
+never disable dry-run, turn on automatic installation, or remove a deadline override.
+They change the draft only. Installation/activation remains a deliberate review choice.
+
+MDM / PERMISSION PROFILES REMAIN SEPARATE
+Profiles are alongside the package, not silently installed by it. Pause any existing
+PUSH monitoring before changing fleet profiles/policy. Scope profiles through MDM to
+a managed pilot before deploying the reviewed client package. Replace older conflicting
+JamfCheckIn notification profiles. Exact background-item identities are used; no broad
+team-wide or prefix approval is generated. A supplied Team ID must match real signing.
+
+Unattended OS authorization must be provisioned through the supported MDM/bootstrap
+or IT-managed credential route. No end-user password fallback is added. A profile
+cannot enroll a Mac or manufacture a bootstrap token. Notification permission does
+not guarantee visibility through every Focus mode or logged-out session.
+
+Optional uptime restart enforcement uses System Events automation. For an all-in-one
+package that enables it, the embedded client must have a valid Developer ID signature
+matching the selected executable/approval. The bundled local ad-hoc client cannot
+satisfy that requirement; disable uptime enforcement for local package-builder tests.
+No broad Full Disk Access/Accessibility/Screen Recording grants are added.
+
+DEPENDENCIES
+Mist (where selected/needed), a protected Installomator provider for third-party app
+updates, supported Self Service/Company Portal registration components and managed
+upgrade authorization are separate fleet prerequisites. Suggestions explain them;
+this builder does not silently install those products or collect their credentials.
+
+OUTPUT FOLDER
+PUSH-Configured-Client.pkg — the ONE client installer to deploy.
+Profiles/ — computer profiles for MDM delivery.
+PolicyPayload/ — reviewed YAML/images for inspection, already inside the installer.
+manifest.json — artifact hashes, policy hash, source-client identity and chosen mode.
+READ-ME-FIRST.txt — package-specific instructions.
+No separate policy installer or activation script is needed for this build path.
+The advanced split-package export remains available for existing MDM workflows.
+
+SIGNING / VERIFICATION
+Current local binaries are ad-hoc signed and generated installers are unsigned.
+Use verified Developer ID signing and notarization before production rollout.
+Repackaging preserves app signatures; the new installer still needs installer signing.
+The builder uses packaging tools only. It never runs installer, PUSH or launchctl on
+its own host. Scripts are created for future installation, never executed while building.
+Offline checks and real package-build/inspection tests cover both modes. Native GUI,
+MDM acceptance, unattended authorization, login and reboot behavior still need a pilot.
+
+Apple payload references:
+https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.servicemanagement.yaml
+https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.notificationsettings.yaml
+https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.TCC.configuration-profile-policy.yaml

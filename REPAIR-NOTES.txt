@@ -1,3 +1,8 @@
+Current pilot: PUSH 1.16.7 / Admin 1.16.10
+Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
+See docs/RELEASE-NOTES-1.16.7-ADMIN-1.16.10.md and docs/VERIFICATION-1.16.7.md.
+The following notes are historical and do not describe current package contents.
+
 Toast response and design update — November 5, 2026
 Developer: Sebastian Santos
 Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS

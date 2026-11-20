@@ -109,7 +109,10 @@ struct CLIUIConfig: Codable {
     var minorMessage:            String = "A required macOS security update is available."
     var majorMessage:            String = "A major macOS upgrade is required."
     var deadlineMessage:         String = "Your Mac must be updated immediately."
-    var downloadingMessage:      String = "Downloading the macOS update in the background."
+    var downloadHeader: String = DownloadWording.header
+    var downloadTitle: String = DownloadWording.title
+    var downloadingMessage: String = DownloadWording.message
+    var downloadFooter: String = DownloadWording.footer
     var installingMessage:       String = "Installation in progress. This takes 45–60 minutes."
     var alreadyUpToDateMessage:  String = "Your Mac is up to date."
     var forcedInstallMessage:    String = ""
@@ -167,6 +170,7 @@ struct CLIAutoConfig: Codable {
     // Machines already on 26.x but behind on minor → minor update nudge
     // Leave 0 to let auto-check decide purely from softwareupdate output.
     var enforceMinimumMajorVersion: Int = 0
+    var maximumMajorVersion:Int = 0 // 0 has no ceiling; scoped workflows can stay on a selected major
 }
 
 struct CLIScheduleConfig: Codable {
@@ -243,6 +247,7 @@ struct CLIJamfConfig: Codable {
 
 // CLIAuthConfig — local account credentials for Apple Silicon auth
 struct CLIAuthConfig: Codable {
+    var promptUserForInstall:Bool = false // Opt-in existing user login-Keychain authorization
     // Local admin account used for softwareupdate/startosinstall --user/--stdinpass
     var localAccount:  String = ""
     var localPassword: String = ""
@@ -275,6 +280,7 @@ struct CLIDeferralState: Codable {
     var lastDiscoveryError: String? = nil
     var lastRecoveryMessage: String? = nil
     var installTargetVersion: String? = nil
+    var installOrigin: String? = nil
     var installBootTimestamp: Double? = nil
     var lastToastTarget: String? = nil
     var deadlineNoticeTarget: String? = nil
@@ -398,7 +404,10 @@ extension CLIConfig {
             c.ui.minorMessage             = str(u, "minorMessage",            c.ui.minorMessage)
             c.ui.majorMessage             = str(u, "majorMessage",            c.ui.majorMessage)
             c.ui.deadlineMessage          = str(u, "deadlineMessage",         c.ui.deadlineMessage)
-            c.ui.downloadingMessage       = str(u, "downloadingMessage",      c.ui.downloadingMessage)
+            c.ui.downloadHeader = str(u, "downloadHeader", c.ui.downloadHeader)
+            c.ui.downloadTitle = str(u, "downloadTitle", c.ui.downloadTitle)
+            c.ui.downloadingMessage = str(u, "downloadingMessage", c.ui.downloadingMessage)
+            c.ui.downloadFooter = str(u, "downloadFooter", c.ui.downloadFooter)
             c.ui.installingMessage        = str(u, "installingMessage",       c.ui.installingMessage)
             c.ui.alreadyUpToDateMessage   = str(u, "alreadyUpToDateMessage",  c.ui.alreadyUpToDateMessage)
             c.ui.forcedInstallMessage     = str(u, "forcedInstallMessage",    c.ui.forcedInstallMessage)
@@ -446,6 +455,7 @@ extension CLIConfig {
             c.auto.notifyOnInstallComplete      = boo(a, "notifyOnInstallComplete",    true)
             c.auto.autoInstallNonSystemUpdates  = boo(a, "autoInstallNonSystemUpdates", true)
             c.auto.enforceMinimumMajorVersion   = int(a, "enforceMinimumMajorVersion", 0)
+            c.auto.maximumMajorVersion = int(a, "maximumMajorVersion", 0)
         }
 
         if let s = root["schedule"] as? [String: Any] {
@@ -495,6 +505,7 @@ extension CLIConfig {
         }
 
         if let a = root["auth"] as? [String: Any] {
+            c.auth.promptUserForInstall = boo(a, "promptUserForInstall", false)
             c.auth.localAccount  = str(a, "localAccount",  "")
             c.auth.localPassword = str(a, "localPassword", "")
         }
@@ -514,6 +525,28 @@ extension CLIConfig {
     }
 
     // MARK: - Minimal YAML dict parser
+
+    /// Strip only YAML comments outside quotes. Keep URL fragments, color hashes,
+    /// escaped quotes, and doubled apostrophes inside quoted values intact.
+    static func yamlScalarText(_ raw:String)->String {
+        let chars=Array(raw);var quote:Character?=nil;var escaped=false;var i=0;var end=chars.count
+        while i<chars.count {
+            let char=chars[i]
+            if let active=quote {
+                if active == "\"" {
+                    if escaped {escaped=false;i+=1;continue}
+                    if char == "\\" {escaped=true;i+=1;continue}
+                }
+                if char==active {
+                    if active == "'",i+1<chars.count,chars[i+1]=="'" {i+=2;continue}
+                    quote=nil
+                }
+            }else if char == "#",i==0 || chars[i-1].isWhitespace {end=i;break}
+            else if (char == "\"" || char == "'"),i==0 || chars[i-1].isWhitespace {quote=char}
+            i+=1
+        }
+        return String(chars[..<end]).trimmingCharacters(in:.whitespaces)
+    }
 
     static func parseYAMLDict(_ source: String) -> [String: Any] {
         var root:           [String: Any]           = [:]
@@ -538,14 +571,16 @@ extension CLIConfig {
             let key   = String(parts[0]).trimmingCharacters(in: .whitespaces)
             var value = String(parts[1]).trimmingCharacters(in: .whitespaces)
 
-            if !value.hasPrefix("\"") && !value.hasPrefix("'"),
-               let hi = value.firstIndex(of: "#") {
-                value = String(value[..<hi]).trimmingCharacters(in: .whitespaces)
+            value = yamlScalarText(value)
+            if value.hasPrefix("\""),value.hasSuffix("\""),let data=value.data(using:.utf8),let decoded=try? JSONDecoder().decode(String.self,from:data) {
+                sections[currentSection,default:[:]][key]=decoded
+                if indent>0 && !currentSection.isEmpty {root[currentSection]=sections[currentSection]!}else{root[key]=decoded}
+                continue
             }
-            if value.count >= 2,
-               (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-               (value.hasPrefix("'")  && value.hasSuffix("'")) {
-                value = String(value.dropFirst().dropLast())
+            if value.count>=2,value.hasPrefix("'"),value.hasSuffix("'") {
+                let decoded=String(value.dropFirst().dropLast()).replacingOccurrences(of:"''",with:"'")
+                if indent>0 && !currentSection.isEmpty {sections[currentSection,default:[:]][key]=decoded;root[currentSection]=sections[currentSection]!}else{root[key]=decoded}
+                continue
             }
 
             let parsed: Any

@@ -49,8 +49,11 @@ struct UIConfig {
         var minorMessage:            String = "A required macOS security update is available. Please install it at your earliest convenience."
         var majorMessage:            String = "A major macOS upgrade is required. Please save your work and begin the upgrade today."
         var deadlineMessage:         String = "Your Mac must be updated immediately. Save your work and click Install Now to begin."
-        var downloadingMessage:      String = "Downloading the macOS update in the background. Please keep your Mac plugged in."
-        var installingMessage:       String = "Installation in progress. This takes 45–60 minutes. Please keep your Mac powered on."
+        var downloadHeader: String = DownloadWording.header
+        var downloadTitle: String = DownloadWording.title
+        var downloadingMessage: String = DownloadWording.message
+        var downloadFooter: String = DownloadWording.footer
+        var installingMessage:       String = "macOS is preparing the update. Follow its progress below."
         var alreadyUpToDateMessage:  String = "Your Mac is running the required version of macOS. No action needed."
         var forcedInstallMessage:    String = ""   // Shown during auto forced install — leave empty for smart default
         var forcedInstallNotice:     String = ""   // Overrides the "What to expect" bullet points — leave empty for default
@@ -118,8 +121,11 @@ struct UIConfig {
     }
 
     var friendlyTargetVersion: String {
-        let name = update.macOSName.isEmpty ? "macOS" : update.macOSName
-        return update.targetVersion.isEmpty ? name : "\(name) \(update.targetVersion)"
+        DownloadWording.label(name:update.macOSName,version:update.targetVersion)
+    }
+
+    func downloadCopy(_ value:String,fallback:String="")->String {
+        DownloadWording.render(value,name:update.macOSName,version:update.targetVersion,fallback:fallback)
     }
 
     var deadlineDate: Date? {
@@ -196,7 +202,10 @@ struct UIConfig {
             cfg.ui.minorMessage             = str(u, "minorMessage",            cfg.ui.minorMessage)
             cfg.ui.majorMessage             = str(u, "majorMessage",            cfg.ui.majorMessage)
             cfg.ui.deadlineMessage          = str(u, "deadlineMessage",         cfg.ui.deadlineMessage)
-            cfg.ui.downloadingMessage       = str(u, "downloadingMessage",      cfg.ui.downloadingMessage)
+            cfg.ui.downloadHeader = str(u, "downloadHeader", cfg.ui.downloadHeader)
+            cfg.ui.downloadTitle = str(u, "downloadTitle", cfg.ui.downloadTitle)
+            cfg.ui.downloadingMessage = str(u, "downloadingMessage", cfg.ui.downloadingMessage)
+            cfg.ui.downloadFooter = str(u, "downloadFooter", cfg.ui.downloadFooter)
             cfg.ui.installingMessage        = str(u, "installingMessage",       cfg.ui.installingMessage)
             cfg.ui.alreadyUpToDateMessage   = str(u, "alreadyUpToDateMessage",  cfg.ui.alreadyUpToDateMessage)
             cfg.ui.forcedInstallMessage     = str(u, "forcedInstallMessage",    cfg.ui.forcedInstallMessage)
@@ -239,6 +248,28 @@ struct UIConfig {
         return cfg
     }
 
+    /// Strip only YAML comments outside quotes. Keep URL fragments, color hashes,
+    /// escaped quotes, and doubled apostrophes inside quoted values intact.
+    static func yamlScalarText(_ raw:String)->String {
+        let chars=Array(raw);var quote:Character?=nil;var escaped=false;var i=0;var end=chars.count
+        while i<chars.count {
+            let char=chars[i]
+            if let active=quote {
+                if active == "\"" {
+                    if escaped {escaped=false;i+=1;continue}
+                    if char == "\\" {escaped=true;i+=1;continue}
+                }
+                if char==active {
+                    if active == "'",i+1<chars.count,chars[i+1]=="'" {i+=2;continue}
+                    quote=nil
+                }
+            }else if char == "#",i==0 || chars[i-1].isWhitespace {end=i;break}
+            else if (char == "\"" || char == "'"),i==0 || chars[i-1].isWhitespace {quote=char}
+            i+=1
+        }
+        return String(chars[..<end]).trimmingCharacters(in:.whitespaces)
+    }
+
     private static func parseYAMLDict(_ source: String) -> [String: Any] {
         var root:           [String: Any]           = [:]
         var sections:       [String: [String: Any]] = [:]
@@ -262,14 +293,16 @@ struct UIConfig {
             let key   = String(parts[0]).trimmingCharacters(in: .whitespaces)
             var value = String(parts[1]).trimmingCharacters(in: .whitespaces)
 
-            if !value.hasPrefix("\"") && !value.hasPrefix("'"),
-               let hi = value.firstIndex(of: "#") {
-                value = String(value[..<hi]).trimmingCharacters(in: .whitespaces)
+            value = yamlScalarText(value)
+            if value.hasPrefix("\""),value.hasSuffix("\""),let data=value.data(using:.utf8),let decoded=try? JSONDecoder().decode(String.self,from:data) {
+                sections[currentSection,default:[:]][key]=decoded
+                if indent>0 && !currentSection.isEmpty {root[currentSection]=sections[currentSection]!}else{root[key]=decoded}
+                continue
             }
-            if value.count >= 2,
-               (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-               (value.hasPrefix("'")  && value.hasSuffix("'")) {
-                value = String(value.dropFirst().dropLast())
+            if value.count>=2,value.hasPrefix("'"),value.hasSuffix("'") {
+                let decoded=String(value.dropFirst().dropLast()).replacingOccurrences(of:"''",with:"'")
+                if indent>0 && !currentSection.isEmpty {sections[currentSection,default:[:]][key]=decoded;root[currentSection]=sections[currentSection]!}else{root[key]=decoded}
+                continue
             }
 
             let parsed: Any

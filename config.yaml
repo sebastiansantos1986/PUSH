@@ -8,7 +8,8 @@ update:
   maxAutomaticRetriesPerDay: 3
   allowUserUpdateRequests: true
   targetVersion: ""
-  deadline: ""  # Explicit ISO 8601 override; blank uses the automatic deadline
+  # Explicit ISO 8601 override; blank uses the automatic deadline
+  deadline: ""
   prepareAtDeadlineWhenLoggedOut: true
   silentInstallAfterDeadline: false
   autoInstallAfterDeadline: false
@@ -58,3 +59,7 @@ compliance:
   wallpaperEnabled: false
   nonCompliantWallpaper: "/Library/Management/PUSH/assets/wallpapers/PUSH-NonCompliant.png"
   compliantWallpaper: ""
+
+# Opt-in existing user Keychain storage; prompts only for missing/invalid credentials.
+auth:
+  promptUserForInstall: false

@@ -10,16 +10,21 @@ import OpenDirectory
 /// No shell, credential arguments, temporary password files, or output logging.
 /// The callback receives output only; callers must redact secrets before logging.
 func runDirect(_ executable: String, _ arguments: [String], input: String? = nil,
-               onOutput: ((String) -> Void)? = nil) -> (String, Int32) {
+               onOutput: ((String) -> Void)? = nil, discardStderr:Bool = false) -> (String, Int32) {
+    runDirectStarted(executable,arguments,input:input,onStart:{_ in},onOutput:onOutput,discardStderr:discardStderr)
+}
+func runDirectStarted(_ executable:String,_ arguments:[String],input:String?=nil,
+                      onStart:(Process)->Void,onOutput:((String)->Void)?=nil,discardStderr:Bool=false)->(String,Int32){
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
     let output = Pipe(), stdin = Pipe()
     process.standardOutput = output
-    process.standardError = output
+    if discardStderr {process.standardError=FileHandle.nullDevice}else{process.standardError = output}
     process.standardInput = stdin
     do {
         try process.run()
+        onStart(process)
         // Installer passwords are small. Reject oversized input before calling this helper.
         if let input { try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
         try stdin.fileHandleForWriting.close()
@@ -53,7 +58,8 @@ func verifyLocalPassword(account: String, password: String) -> Bool {
 
 /// Security.framework keeps secret bytes out of process arguments and shell history.
 /// Login entries are accessed by push-ui itself, preserving its keychain ACL.
-// End-user password collection is disabled for this managed deployment.
+// Legacy password-saving popups remain disabled. Installation-only prompts
+// require an explicit auth.promptUserForInstall opt-in and use a private pipe.
 let allowsUserPasswordPrompts = false
 
 enum PushKeychain {
@@ -87,19 +93,34 @@ enum PushKeychain {
     }
     static func save(service: String, account: String, password: String, system: Bool = false) -> Bool {
         guard !account.isEmpty, !password.isEmpty,
-              var q = query(service: service, account: account, system: system) else { return false }
-        var access: SecAccess?
-        guard SecAccessCreate("PUSH credential" as CFString, nil, &access) == errSecSuccess,
-              let access else { return false }
-        let attributes: [String: Any] = [kSecValueData as String: Data(password.utf8), kSecAttrAccess as String: access]
-        let status = SecItemUpdate(q as CFDictionary, attributes as CFDictionary)
-        if status == errSecSuccess { return true }
-        guard status == errSecItemNotFound else { return false }
-        if system, let keychains = q.removeValue(forKey: kSecMatchSearchList as String) as? [SecKeychain],
-           let keychain = keychains.first { q[kSecUseKeychain as String] = keychain }
-        q[kSecValueData as String] = Data(password.utf8)
-        q[kSecAttrAccess as String] = access
-        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
+              let q = query(service: service, account: account, system: system) else { return false }
+        return writePassword(query:q,password:Data(password.utf8),
+            update:{SecItemUpdate($0 as CFDictionary,$1 as CFDictionary)},
+            add:{SecItemAdd($0 as CFDictionary,nil)},
+            newAccess:{
+                var access:SecAccess?
+                guard SecAccessCreate("PUSH credential" as CFString,nil,&access)==errSecSuccess,
+                      let access else{return nil}
+                return access
+            })
+    }
+    /// Updating secret data must preserve the item's existing ACL. Supplying
+    /// kSecAttrAccess to SecItemUpdate requests an ACL replacement and can cause
+    /// a second macOS password dialog. Create the private ACL only for a NEW item.
+    /// Injected operations let offline regressions cover denial without Keychain I/O.
+    static func writePassword(query:[String:Any],password:Data,
+                              update:([String:Any],[String:Any])->OSStatus,
+                              add:([String:Any])->OSStatus,
+                              newAccess:()->Any?)->Bool {
+        let status=update(query,[kSecValueData as String:password])
+        if status==errSecSuccess{return true}
+        guard status==errSecItemNotFound,let access=newAccess() else{return false}
+        var item=query
+        if let keychains=item.removeValue(forKey:kSecMatchSearchList as String) as? [SecKeychain],
+           let keychain=keychains.first {item[kSecUseKeychain as String]=keychain}
+        item[kSecValueData as String]=password
+        item[kSecAttrAccess as String]=access
+        return add(item)==errSecSuccess
     }
     static func delete(service: String, account: String, system: Bool = false) -> Bool {
         guard let q = query(service: service, account: account, system: system) else { return false }
@@ -480,5 +501,18 @@ struct EntraNotice: Codable {
     static func decode(_ encoded: String) -> EntraNotice? {
         guard encoded.utf8.count <= 8192, let data = Data(base64Encoded:encoded), let notice = try? JSONDecoder().decode(Self.self,from:data), (1...4).contains(notice.stage), (0...100000).contains(notice.laterCount), notice.message.count <= 2000 else { return nil }
         return notice
+    }
+}
+
+/// Ephemeral child-to-parent pipe frame. Never serialize into logs, YAML or disk.
+struct InstallAuthorizationReply:Codable {
+    static func trustedRequester(uid:UInt32,realUID:UInt32,path:String,pipe:Bool)->Bool {
+        uid==0 && realUID==0 && pipe && ["/usr/bin/sudo","/bin/launchctl","/Library/Management/PUSH/push-cli"].contains(path)
+    }
+    let account:String
+    let password:String
+    static func decode(_ data:Data,expectedAccount:String)->Self? {
+        guard data.count<=16384,let value=try? JSONDecoder().decode(Self.self,from:data),value.account==expectedAccount,!value.account.isEmpty,!value.password.isEmpty,value.password.utf8.count<=4096,!value.password.contains("\n"),!value.password.contains("\r") else{return nil}
+        return value
     }
 }

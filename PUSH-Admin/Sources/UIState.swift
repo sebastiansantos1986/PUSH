@@ -80,6 +80,8 @@ class UIContext: ObservableObject {
     var recoveryNotice=RecoveryNotice.preview()
     let isPreview = true
     let isManualTest = true
+    var restartPrepared=false
+    var isSelfServiceOffer=false
     var onPreviewAction: ((String, String, Int32?, Bool) -> Void)?
     let config:        UIConfig
     let state:         UIState

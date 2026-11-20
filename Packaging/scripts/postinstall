@@ -41,7 +41,7 @@ if [[ -e /usr/local/bin/push-cli && ! -L /usr/local/bin/push-cli ]]; then
     /bin/rm /usr/local/bin/push-cli
 fi
 /bin/ln -sfn "$base/push-cli" /usr/local/bin/push-cli
-printf '%s\n' 'PUSH 1.11.0 installed for local verification.' \
+printf '%s\n' 'PUSH 1.16.7 installed for local verification.' \
     'Configuration, state, and Keychain credentials were preserved.' \
     'The previous schedule is paused. No application or upgrade was started.' \
     'Run /Library/Management/PUSH/push-cli --version to confirm the installed build.' \

@@ -10,13 +10,13 @@ struct PopupExperienceControls:View {
     var body:some View {
         VStack(alignment:.leading,spacing:12) {
             Stepper("Width: \(Int(presentation.width)) pt",value:$presentation.width,in:360...900,step:20)
-            Stepper("Height: \(Int(presentation.height)) pt",value:$presentation.height,in:240...1000,step:20)
+            Stepper("Height limit: \(Int(presentation.height)) pt",value:$presentation.height,in:200...1000,step:20)
             TextField("Banner text",text:$presentation.bannerText).textFieldStyle(.roundedBorder)
             TextField("Greeting template",text:$presentation.greetingTemplate).textFieldStyle(.roundedBorder)
             Text("Use {fullName}, {firstName} or {username}. The logged-in user is resolved when the popup opens; names are not baked into the package.").font(.caption).foregroundStyle(.secondary)
             HStack {Button("Choose banner image…"){chooseBanner()};Button("Remove image"){presentation.bannerImage=nil}.disabled(presentation.bannerImage==nil)}
             if !issue.isEmpty {Text(issue).font(.caption).foregroundStyle(.orange)}
-            Text("Native windows are resizable and fit the visible screen. Scrollbars keep all controls reachable on smaller displays.").font(.caption).foregroundStyle(.secondary)
+            Text("Notices shrink to fit their content up to this height limit. Long messages scroll above fixed buttons. Major-upgrade demos use the selected window height. All windows fit the visible screen.").font(.caption).foregroundStyle(.secondary)
         }
     }
     private func chooseBanner() {

@@ -9,11 +9,11 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/push-admin-tests.XXXXXX")"
 trap 'rm -rf "$test_dir"' EXIT
 sources=()
 for source in Sources/*.swift; do
-    [[ "$source" == Sources/AdminApp.swift || "$source" == Sources/MajorUpgradePage.swift || "$source" == Sources/SinglePopupPage.swift || "$source" == Sources/PopupExperienceControls.swift || "$source" == Sources/SetupAdvisorCard.swift || "$source" == Sources/DeploymentExportPage.swift || "$source" == Sources/SmartSetup.swift || "$source" == Sources/AppsPage.swift || "$source" == Sources/RecoverySettingsPage.swift || "$source" == Sources/WallpaperPage.swift || "$source" == Sources/NotificationHistoryPage.swift || "$source" == Sources/SetupWizardPage.swift || "$source" == Sources/ReadinessPage.swift || "$source" == Sources/EntraPage.swift ]] || sources+=("$source")
+    [[ "$source" == Sources/JamfDeploymentControls.swift || "$source" == Sources/JamfNameEditorView.swift || "$source" == Sources/JamfPublishSuccessView.swift || "$source" == Sources/JamfPublisherPage.swift || "$source" == Sources/SelfServicePage.swift || "$source" == Sources/WorkflowLibraryViews.swift || "$source" == Sources/AdminApp.swift || "$source" == Sources/WorkflowBuilderPage.swift || "$source" == Sources/WorkflowAssistantCard.swift || "$source" == Sources/WorkflowMessageEditor.swift || "$source" == Sources/WorkflowSimulationPage.swift || "$source" == Sources/MajorUpgradePage.swift || "$source" == Sources/SinglePopupPage.swift || "$source" == Sources/PopupExperienceControls.swift || "$source" == Sources/SetupAdvisorCard.swift || "$source" == Sources/DeploymentExportPage.swift || "$source" == Sources/SmartSetup.swift || "$source" == Sources/AppsPage.swift || "$source" == Sources/RecoverySettingsPage.swift || "$source" == Sources/WallpaperPage.swift || "$source" == Sources/NotificationHistoryPage.swift || "$source" == Sources/SetupWizardPage.swift || "$source" == Sources/ReadinessPage.swift || "$source" == Sources/EntraPage.swift ]] || sources+=("$source")
 done
 compiler_flags=()
 if [[ "${PUSH_MACRO_SANDBOX_WORKAROUND:-0}" == 1 ]]; then compiler_flags=(-Xfrontend -disable-sandbox); fi
-xcrun swiftc -swift-version 5 -module-cache-path "$test_dir/modules" "${compiler_flags[@]}" \
-    -framework AppKit -framework SwiftUI -framework IOKit \
-    "${sources[@]}" "$engine_config" Tests/main.swift -o "$test_dir/tests"
+xcrun swiftc -swift-version 5 -module-cache-path "$test_dir/modules" ${compiler_flags[@]+"${compiler_flags[@]}"} \
+    -framework Security -framework AppKit -framework SwiftUI -framework IOKit \
+    "${sources[@]}" "$engine_config" Tests/JamfPublisherChecks.swift Tests/main.swift -o "$test_dir/tests"
 "$test_dir/tests" "$PWD/Tests/Fixtures/red-pixel.png"

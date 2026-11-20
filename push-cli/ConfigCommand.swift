@@ -115,6 +115,7 @@ struct ConfigCommand {
         case "auto.notifyOnDeadlineHit":           return "\(config.auto.notifyOnDeadlineHit)"
         case "auto.notifyOnDeferralExhausted":     return "\(config.auto.notifyOnDeferralExhausted)"
         case "auto.notifyOnInstallComplete":       return "\(config.auto.notifyOnInstallComplete)"
+        case "auto.maximumMajorVersion": return "\(config.auto.maximumMajorVersion)"
         case "auto.enforceMinimumMajorVersion":    return "\(config.auto.enforceMinimumMajorVersion)"
         case "auto.skipBetas":                     return "\(config.auto.skipBetas)"
         case "jamf.binaryPath":                   return config.jamf.binaryPath
@@ -126,6 +127,7 @@ struct ConfigCommand {
         case "jamf.accountName":                  return config.jamf.accountName
         case "jamf.accountPassword":              return redactedValue(config.jamf.accountPassword)
         case "jamf.computerId":                   return config.jamf.computerId
+        case "auth.promptUserForInstall": return "\(config.auth.promptUserForInstall)"
         case "auth.localAccount":                 return config.auth.localAccount
         case "auth.localPassword":                return redactedValue(config.auth.localPassword)
         case "preflight.minBatteryPercent":       return "\(config.preflight.minBatteryPercent)"
@@ -266,6 +268,7 @@ struct ConfigCommand {
         }
 
         var issues: [String] = []
+        if config.auto.maximumMajorVersion>0 && config.auto.enforceMinimumMajorVersion>config.auto.maximumMajorVersion {issues.append("The minimum OS major is above the selected maximum.")}
 
         if !EntraNudgeCommand.valid(config.entra) { issues.append("Invalid Entra registration policy ID, app paths, message, or working hours") }
         let approved = AppUpdatePolicy.ids(config.apps.approved)

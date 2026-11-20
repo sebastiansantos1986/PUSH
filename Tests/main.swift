@@ -4,6 +4,7 @@
 // Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
 
 import Foundation
+import Security
 
 let cliVersion = "test-only"
 var count = 0
@@ -16,6 +17,35 @@ let root = FileManager.default.temporaryDirectory.appendingPathComponent("push-t
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
 defer { try? FileManager.default.removeItem(at: root) }
 
+// Exercise the real save orchestration with an in-memory Security backend.
+// No Keychain item or password is read, written, deleted or unlocked.
+let keychainQuery:[String:Any]=[kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:"fixture-service",kSecAttrAccount as String:"fixture-user"]
+let fixtureSecret=Data("fixture-only-password".utf8)
+var updateCalls=0,addCalls=0,accessCalls=0
+let changed=PushKeychain.writePassword(query:keychainQuery,password:fixtureSecret,update:{query,attributes in
+    updateCalls+=1
+    check(query[kSecAttrAccount as String] as? String=="fixture-user","credential update retains account scope")
+    check(Set(attributes.keys)==[kSecValueData as String] && attributes[kSecValueData as String] as? Data==fixtureSecret,"existing credential updates only password data, never ACL or access groups")
+    return errSecSuccess
+},add:{_ in addCalls+=1;return errSecSuccess},newAccess:{accessCalls+=1;return "fixture-private-access"})
+check(changed && updateCalls==1 && addCalls==0 && accessCalls==0,"existing credential keeps its ACL without creation or permission replacement")
+for denied in [errSecAuthFailed,errSecInteractionNotAllowed,errSecUserCanceled] {
+    var calls=0
+    let saved=PushKeychain.writePassword(query:keychainQuery,password:fixtureSecret,update:{_,_ in denied},add:{_ in calls+=1;return errSecSuccess},newAccess:{calls+=1;return "forbidden"})
+    check(!saved && calls==0,"denied credential save fails closed without ACL reset, deletion or retry: \(denied)")
+}
+var createdAccess=0
+let created=PushKeychain.writePassword(query:keychainQuery,password:fixtureSecret,update:{_,_ in errSecItemNotFound},add:{item in
+    check(item[kSecAttrAccess as String] as? String=="fixture-private-access" && item[kSecValueData as String] as? Data==fixtureSecret,"new credential alone receives private access settings and password")
+    return errSecSuccess
+},newAccess:{createdAccess+=1;return "fixture-private-access"})
+check(created && createdAccess==1,"new item creates its private ACL once")
+var duplicateAdds=0
+let duplicate=PushKeychain.writePassword(query:keychainQuery,password:fixtureSecret,update:{_,_ in errSecItemNotFound},add:{_ in duplicateAdds+=1;return errSecDuplicateItem},newAccess:{"fixture-private-access"})
+check(!duplicate && duplicateAdds==1,"concurrent item creation does not trigger a destructive replacement or retry")
+var failedAccessAdds=0
+check(!PushKeychain.writePassword(query:keychainQuery,password:fixtureSecret,update:{_,_ in errSecItemNotFound},add:{_ in failedAccessAdds+=1;return errSecSuccess},newAccess:{nil}) && failedAccessAdds==0,"private ACL creation failure cannot add an unprotected credential")
+
 check(sameOSVersion("26.1", "26.1.0"), "normalize trailing zero")
 check(!sameOSVersion("26.1", "26.10"), "reject version prefix collision")
 for malformed in ["", "26", "26..1", "26.1beta", "26.1;touch x", "26.1.0.1", "２６.１"] {
@@ -23,7 +53,7 @@ for malformed in ["", "26", "26..1", "26.1beta", "26.1;touch x", "26.1.0.1", "�
 }
 check(versionGTE("27.0", "27") && versionGTE("27", "27.0"), "major-only and dotted versions are equally compliant")
 check(!versionGTE("26.9", "27"), "older OS still counts as a pending update")
-check(!allowsUserPasswordPrompts, "managed policy disables end-user password prompts")
+check(!allowsUserPasswordPrompts, "legacy password-saving popups remain disabled")
 let listing = """
 * Label: macOS-test-26.10
     Title: macOS, Version: 26.10, Size: 123KiB, Recommended: YES, Action: restart,
@@ -58,6 +88,20 @@ check(InstallerValidation.matches(right.path, target: "26.1"), "matching product
 check(!InstallerValidation.matches(unknown.path, target: "26.1"), "unknown product metadata fails closed")
 let foundInstaller = InstallerValidation.find(in: [root.path], target: "26.1")
 check(foundInstaller.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == right.resolvingSymlinksInPath().path, "discovery skips wrong and unknown installers")
+do {
+    let managed=root.appendingPathComponent("managed"),apps=root.appendingPathComponent("Applications")
+    let downloads=managed.appendingPathComponent("downloads")
+    try FileManager.default.createDirectory(at:downloads,withIntermediateDirectories:true)
+    try FileManager.default.createDirectory(at:apps,withIntermediateDirectories:false)
+    let cached=downloads.appendingPathComponent("Install Mist macOS.app"),fallback=apps.appendingPathComponent("Install Software Update macOS.app")
+    try FileManager.default.copyItem(at:right,to:cached)
+    check(InstallerValidation.findForInstall(target:"26.1",managedRoot:managed.path,applications:apps.path).map { URL(fileURLWithPath:$0).resolvingSymlinksInPath().path }==cached.resolvingSymlinksInPath().path,"post-download discovery finds Mist output when Applications contains no installer")
+    try FileManager.default.copyItem(at:right,to:fallback)
+    check(InstallerValidation.findForInstall(target:"26.1",managedRoot:managed.path,applications:apps.path).map { URL(fileURLWithPath:$0).resolvingSymlinksInPath().path }==cached.resolvingSymlinksInPath().path,"existing and downloaded installers consistently prefer the managed cache")
+    try FileManager.default.removeItem(at:cached)
+    check(InstallerValidation.findForInstall(target:"26.1",managedRoot:managed.path,applications:apps.path).map { URL(fileURLWithPath:$0).resolvingSymlinksInPath().path }==fallback.resolvingSymlinksInPath().path,"softwareupdate output remains discoverable in Applications")
+    check(InstallerValidation.findForInstall(target:"27.2.1",managedRoot:managed.path,applications:apps.path)==nil,"discovery never substitutes an installer for another OS target")
+}
 try FileManager.default.removeItem(at: right.appendingPathComponent("Contents/Resources/startosinstall"))
 check(!InstallerValidation.matches(right.path, target: "26.1"), "missing installer tool rejected")
 let metadata = root.appendingPathComponent("asset.xml")
@@ -65,6 +109,98 @@ try PropertyListSerialization.data(fromPropertyList: ["Assets": [["OSVersion": "
 check(InstallerValidation.productVersion(in: metadata) == "26.1", "modern MobileAsset metadata parsed")
 try PropertyListSerialization.data(fromPropertyList: ["Assets": [["OSVersion": "26.1"], ["OSVersion": "26.2"]]], format: .xml, options: 0).write(to: metadata)
 check(InstallerValidation.productVersion(in: metadata) == nil, "ambiguous asset versions rejected")
+
+// Run only the validation decision logic. None of these fixture paths or
+// signature/image/Gatekeeper operations can execute an installer.
+do {
+    let app="/fixture/Install macOS.app",tool="/fixture/Install macOS.app/Contents/Resources/startosinstall"
+    func assess(strict:Int32=0,relaxed:Int32=0,helper:Int32=0,id:String="com.apple.InstallAssistant.GoldenGate",gate:Int32=0,payload:Bool=true,owned:Bool=true,version:Bool=true,nestedOK:Bool=true)->(InstallerTrustResult,[String]) {
+        var calls:[String]=[]
+        let result=AppleInstallerTrust.validate(app,target:"27.2.1",protected:{_ in owned},matches:{_,_ in version},signature:{path,resources in
+            calls.append(path+" resources="+String(resources))
+            if path==tool {return .init(status:helper,identifier:"startosinstall")}
+            return .init(status:resources ? relaxed:strict,identifier:id)
+        },assess:{path in calls.append("Gatekeeper "+path);return gate},image:{path in calls.append("Image "+path);return payload},nested:{path in calls.append("Nested "+path);return nestedOK})
+        return (result,calls)
+    }
+    let appleTool=AppleInstallerTrust.codeSignature("/usr/bin/true",allowInstallerResources:false)
+    let baseline=runDirect("/usr/bin/codesign",["--verify","--strict","--all-architectures","-R=anchor apple","/usr/bin/true"]).1
+    check((baseline==0 && appleTool.status==errSecSuccess && !appleTool.identifier.isEmpty) || (baseline != 0 && appleTool.status != errSecSuccess),"real Security.framework agrees with strict system codesign and fails closed when host trust is unavailable")
+    let unsigned=root.appendingPathComponent("unsigned-installer-fixture")
+    try "#!/bin/sh\nexit 99\n".write(to:unsigned,atomically:true,encoding:.utf8)
+    check(AppleInstallerTrust.codeSignature(unsigned.path,allowInstallerResources:false).status != errSecSuccess,"real Security.framework rejects an unsigned executable fixture without running it")
+    let standard=assess()
+    check(standard.0.accepted && standard.1.contains("Gatekeeper "+app),"ordinary top-level Apple installer still requires its Gatekeeper app assessment")
+    let custom=assess(strict:errSecCSWeakResourceRules)
+    check(custom.0.accepted && custom.1.contains(app+" resources=true") && custom.1.contains("Image "+app+"/Contents/SharedSupport/SharedSupport.dmg"),"Apple custom-resource installer requires separately verified app code, helper and image")
+    check(!custom.1.contains(where:{$0.hasPrefix("Gatekeeper ")}),"Apple installer resource format is not assessed as a top-level app or embedded CLI app")
+    check(!assess(strict:errSecCSWeakResourceRules,relaxed:errSecCSUnsigned).0.accepted,"custom resource rules never authorize unsigned app code")
+    check(!assess(strict:errSecCSWeakResourceRules,relaxed:errSecCSReqFailed).0.accepted,"non-Apple certificate cannot use the installer resource exception")
+    check(!assess(strict:errSecCSWeakResourceRules,helper:errSecCSUnsigned).0.accepted,"a valid outer installer cannot authorize an unsigned startosinstall")
+    check(!assess(strict:errSecCSWeakResourceRules,helper:errSecCSWeakResourceRules).0.accepted,"resource relaxation never applies to the executed helper")
+    check(!assess(strict:errSecCSWeakResourceRules,id:"com.apple.Terminal").0.accepted,"unrelated Apple app cannot impersonate InstallAssistant")
+    check(!assess(strict:errSecCSWeakResourceRules,id:"com.apple.InstallAssistantImposter").0.accepted,"installer identifier family is checked at an exact component boundary")
+    let revoked=assess(gate:3)
+    check(!revoked.0.accepted && !revoked.1.contains(where:{$0.hasPrefix("Image ")}),"ordinary-app Gatekeeper denial stops before image or credential handoff")
+    check(!assess(strict:errSecCSWeakResourceRules,nestedOK:false).0.accepted,"the Apple resource exception cannot hide a modified nested executable")
+    var nestedCalls=[Bool]()
+    let nestedPath=app+"/Contents/Frameworks/OSInstallerSetup.framework/Versions/A/OSInstallerSetup"
+    let nestedRules=AppleInstallerTrust.nestedSignature(nestedPath,signature:{_,resources in nestedCalls.append(resources);return .init(status:resources ? errSecSuccess:errSecCSWeakResourceRules,identifier:"com.apple.OSInstallerSetup")})
+    check(nestedRules.status==errSecSuccess && nestedCalls==[false,true],"nested Apple omit-rule format is revalidated with Apple-anchored code hashes")
+    for rejection in [errSecCSUnsigned,errSecCSReqFailed,errSecCSSignatureFailed,errSecCSResourcesNotFound] {
+        nestedCalls=[]
+        let rejected=AppleInstallerTrust.nestedSignature(nestedPath,signature:{_,resources in nestedCalls.append(resources);return .init(status:rejection)})
+        check(rejected.status==rejection && nestedCalls==[false],"ordinary nested signature failure cannot enter resource-format handling: "+String(rejection))
+    }
+    nestedCalls=[]
+    let strictHelper=AppleInstallerTrust.nestedSignature(tool,signature:{_,resources in nestedCalls.append(resources);return .init(status:errSecCSWeakResourceRules)})
+    check(strictHelper.status==errSecCSWeakResourceRules && nestedCalls==[false],"startosinstall remains strict even when scanning nested code")
+    let rejectedNested=AppleInstallerTrust.nestedSignature(nestedPath,signature:{_,resources in .init(status:resources ? errSecCSReqFailed:errSecCSWeakResourceRules)})
+    check(rejectedNested.status==errSecCSReqFailed,"nested resource-format handling still rejects a non-Apple signer")
+    let nestedFixture=root.appendingPathComponent("Nested-code-fixture").resolvingSymlinksInPath()
+    try FileManager.default.createDirectory(at:nestedFixture,withIntermediateDirectories:false)
+    try Data([0xcf,0xfa,0xed,0xfe,0,0,0,0]).write(to:nestedFixture.appendingPathComponent("FrameworkExecutable"))
+    check(AppleInstallerTrust.checkNestedCode(nestedFixture.path,signature:{_,resources in .init(status:resources ? errSecSuccess:errSecCSWeakResourceRules,identifier:"com.apple.fixture")}),"real tree scan handles a nested omit-rule signature through the gated verifier")
+    check(!AppleInstallerTrust.checkNestedCode(nestedFixture.path,signature:{_,resources in .init(status:resources ? errSecCSSignatureFailed:errSecCSWeakResourceRules)}),"nested tree scan stops when executable hashes fail after resource-format handling")
+    check(!assess(strict:errSecCSWeakResourceRules,payload:false).0.accepted,"unsealed installer payload must pass separate disk-image integrity validation")
+    let tampered=assess(strict:-67061)
+    check(!tampered.0.accepted && !tampered.1.contains(app+" resources=true"),"a tampered app signature cannot enter the custom-resource exception")
+    let obsolete=assess(strict:-67007)
+    check(!obsolete.0.accepted && !obsolete.1.contains(app+" resources=true"),"obsolete v1 envelopes do not qualify for the narrow custom-rule exception")
+    check(!assess(owned:false).0.accepted && assess(owned:false).1.isEmpty,"unprotected installer files fail before signature or executable assessment")
+    check(!assess(version:false).0.accepted && assess(version:false).1.isEmpty,"a mismatched OS target fails before signature or executable assessment")
+    check(!AppleInstallerTrust.protectedBundle(root.appendingPathComponent("Install missing.app").path),"an absent/unprotected installer cannot be staged or executed")
+    check(AppleInstallerTrust.validImageResult("hdiutil: verify: checksum of image is VALID",status:0),"disk image verification requires a positive integrity result")
+    check(!AppleInstallerTrust.validImageResult("no checksum; is VALID",status:0),"an image without a checksum cannot satisfy payload validation")
+    check(!AppleInstallerTrust.validImageResult("",status:0),"an empty successful image command is insufficient evidence")
+    check(!AppleInstallerTrust.validImageResult("is VALID",status:1),"a failed image command remains a failure despite reassuring text")
+    let cacheFixture=root.appendingPathComponent("Install Cache Fixture.app")
+    try FileManager.default.createDirectory(at:cacheFixture,withIntermediateDirectories:false)
+    let payload=cacheFixture.appendingPathComponent("payload")
+    try Data("unchanged installer bytes".utf8).write(to:payload)
+    try FileManager.default.setAttributes([.posixPermissions:0o775],ofItemAtPath:payload.path)
+    try FileManager.default.setAttributes([.posixPermissions:0o775],ofItemAtPath:cacheFixture.path)
+    let link=cacheFixture.appendingPathComponent("internal-link")
+    try FileManager.default.createSymbolicLink(atPath:link.path,withDestinationPath:"payload")
+    check(AppleInstallerTrust.removeWritableModes(cacheFixture,owner:getuid()),"cache permission repair accepts internal links and owned writable files")
+    let mode=(try FileManager.default.attributesOfItem(atPath:payload.path)[.posixPermissions] as! NSNumber).intValue
+    let payloadBytes=try Data(contentsOf:payload)
+    check(mode==0o755 && payloadBytes==Data("unchanged installer bytes".utf8),"cache repair removes write permissions without changing executable bits or payload bytes")
+    let escaping=cacheFixture.appendingPathComponent("outside-link")
+    try FileManager.default.createSymbolicLink(atPath:escaping.path,withDestinationPath:"/usr/bin/true")
+    try FileManager.default.setAttributes([.posixPermissions:0o775],ofItemAtPath:payload.path)
+    check(!AppleInstallerTrust.removeWritableModes(cacheFixture,owner:getuid()),"escaping links stop cache repair")
+    let rejectedMode=(try FileManager.default.attributesOfItem(atPath:payload.path)[.posixPermissions] as! NSNumber).intValue
+    check(rejectedMode==0o775,"unsafe tree is rejected before any permission changes")
+    try FileManager.default.removeItem(at:escaping)
+    check(!AppleInstallerTrust.removeWritableModes(cacheFixture,owner:getuid()+1),"cache repair refuses files owned by another account")
+    var adopted=[String]()
+    let adoption=AppleInstallerTrust.repairExtractedPayloadOwnership(cacheFixture,inspect:{path in (99,path.hasSuffix(".dmg") ? mode_t(S_IFREG):mode_t(S_IFDIR))},adopt:{adopted.append($0);return true})
+    check(adoption && adopted.count==2 && adopted.allSatisfy{$0.hasPrefix(cacheFixture.path+"/Contents/SharedSupport")},"only the two extracted _unknown payload entries are adopted in the cache")
+    adopted=[]
+    check(!AppleInstallerTrust.repairExtractedPayloadOwnership(cacheFixture,inspect:{path in (path.hasSuffix(".dmg") ? 501:99,path.hasSuffix(".dmg") ? mode_t(S_IFREG):mode_t(S_IFDIR))},adopt:{adopted.append($0);return true}) && adopted.isEmpty,"user-owned payload fails before any ownership changes")
+    check(!AppleInstallerTrust.repairExtractedPayloadOwnership(cacheFixture,inspect:{_ in (99,mode_t(S_IFLNK))},adopt:{_ in true}),"payload ownership repair refuses symlinks")
+}
 
 let secret = "  p'a\"ss\\word`literal`$(touch should-not-exist)$HOME  "
 let (echoed, catStatus) = runDirect("/bin/cat", [], input: secret + "\n")
@@ -632,5 +768,242 @@ check(currentList.assess(.init(model:"Example",deviceKeys:["NEWBOARD"]),target:"
 var futureCatalog=currentList;futureCatalog.fetchedAt=hardwareNow.addingTimeInterval(1000)
 check(futureCatalog.assess(.init(model:"Example",deviceKeys:["NEWBOARD"]),target:"27",now:hardwareNow).state == .unknown,"future-dated catalog metadata fails closed")
 check(!RecoveryFailureKind.hardware.allowsAutomaticRetry,"unsupported hardware cannot get an automatic install retry countdown")
+
+
+let shortNoticeSize=NoticeWindowLayout.size(width:480,heightLimit:680,measuredHeight:316,screenWidth:1440,screenHeight:900)
+check(shortNoticeSize.height==316 && shortNoticeSize.width==480,"short notices fit content instead of retaining empty configured height")
+let longNoticeSize=NoticeWindowLayout.size(width:480,heightLimit:400,measuredHeight:950,screenWidth:1440,screenHeight:900)
+check(longNoticeSize.height==400,"long notices respect the configured height ceiling")
+let smallScreenNotice=NoticeWindowLayout.size(width:900,heightLimit:1000,measuredHeight:900,screenWidth:800,screenHeight:600)
+check(smallScreenNotice.width==760 && smallScreenNotice.height==520,"notice sizing leaves room for screen margins and window chrome")
+let toastNoticeSize=NoticeWindowLayout.size(width:420,heightLimit:320,measuredHeight:245,screenWidth:1440,screenHeight:900)
+check(toastNoticeSize.height==245,"short toast content shrinks below its height limit")
+let markdownBlocks=NoticeMarkdown.blocks("# Heading\n\nSave **your work**.\n\n- First\n- Second\n1. Then this\n> Note\n```\nliteral *code*\n```")
+check(markdownBlocks == [.heading(1,"Heading"),.paragraph("Save **your work**."),.bullet("First"),.bullet("Second"),.numbered("1.","Then this"),.quote("Note"),.code("literal *code*")],"Markdown preserves headings, separate list items, quotes and literal code")
+check(NoticeMarkdown.blocks("One\nline\n\nTwo") == [.paragraph("One\nline"),.paragraph("Two")],"Markdown preserves line breaks and separate paragraphs")
+check(NoticeMarkdown.blocks("```\nunclosed") == [.code("unclosed")],"an unfinished code fence remains readable")
+let boldInline=NoticeMarkdown.inline("Save **your work** and *close apps*.")
+check(String(boldInline.characters)=="Save your work and close apps.","inline Markdown removes formatting markers from rendered text")
+check(NoticeMarkdown.allowsLink(URL(string:"https://example.com/help")!) && NoticeMarkdown.allowsLink(URL(string:"mailto:help@example.com")!),"web and email links can be opened by an explicit user click")
+check(!NoticeMarkdown.allowsLink(URL(string:"file:///tmp/example")!) && !NoticeMarkdown.allowsLink(URL(string:"jamfselfservice://example")!),"local files and app-command URL schemes are blocked in notice Markdown")
+let unsafeInline=NoticeMarkdown.inline("[Unsafe](file:///tmp/example) and [Safe](https://example.com)")
+check(unsafeInline.runs.compactMap{$0.link}.allSatisfy{NoticeMarkdown.allowsLink($0)} && unsafeInline.runs.compactMap{$0.link}.count==1,"unsafe link targets are removed while safe links retain their attributes")
+var laterResponse=NoticeResponseState()
+check(laterResponse.respond(2) && !laterResponse.respond(0) && laterResponse.result==2,"close/secondary response cannot later become primary acknowledgement")
+var acknowledgedResponse=NoticeResponseState(),ackRemaining=1
+check(acknowledgedResponse.respond(0) && !acknowledgedResponse.tick(remaining:&ackRemaining,timeout:1) && acknowledgedResponse.result==0,"timer cannot overwrite a primary button response")
+var timedResponse=NoticeResponseState(),testRemaining=2
+check(!timedResponse.tick(remaining:&testRemaining,timeout:2) && timedResponse.tick(remaining:&testRemaining,timeout:2) && timedResponse.result==5 && !timedResponse.respond(0),"timeout returns its own result exactly once without claiming consent")
+var noTimeoutResponse=NoticeResponseState(),zeroRemaining=0
+check(!noTimeoutResponse.tick(remaining:&zeroRemaining,timeout:0) && noTimeoutResponse.result==nil,"never-close notices do not generate an automatic response")
+
+
+var compact200=SinglePopupNotice(title:"Compact test",message:"Safe **Markdown** message")
+compact200.presentation.height=200
+check((try? compact200.payload()) != nil,"a 200-point popup passes validation and payload encoding")
+let at200=NoticeWindowLayout.size(width:480,heightLimit:200,measuredHeight:500,screenWidth:1440,screenHeight:900)
+check(at200.height==200,"a 200-point height limit is respected without a hidden 240-point clamp")
+compact200.presentation.height=199
+check((try? compact200.payload()) == nil,"heights below the documented 200-point minimum are rejected")
+
+
+let defaultAuth=CLIConfig.parse(yaml:"auth:\n  localAccount: \"\"\n")
+check(!defaultAuth.auth.promptUserForInstall,"installation credential prompts remain opt-in")
+let optInAuth=CLIConfig.parse(yaml:"auth:\n  promptUserForInstall: true\n")
+check(optInAuth.auth.promptUserForInstall,"YAML explicitly enables ephemeral installation authorization")
+let fixtureReply=try JSONEncoder().encode(InstallAuthorizationReply(account:"fixture-user",password:"fixture-not-a-real-password"))
+check(InstallAuthorizationReply.decode(fixtureReply,expectedAccount:"fixture-user") != nil,"private credential frame accepts the expected local account")
+check(InstallAuthorizationReply.decode(fixtureReply,expectedAccount:"different-user") == nil,"credential replies cannot switch the authorizing account")
+let invalidReply=try JSONEncoder().encode(InstallAuthorizationReply(account:"fixture-user",password:"invalid\npassword"))
+check(InstallAuthorizationReply.decode(invalidReply,expectedAccount:"fixture-user") == nil,"credential frames reject newline-delimited extra input")
+check(InstallAuthorizationReply.decode(Data(repeating:65,count:16385),expectedAccount:"fixture-user") == nil,"credential reply size is bounded before JSON decoding")
+check(InstallAuthorizationReply.decode(Data("invalid".utf8),expectedAccount:"fixture-user") == nil,"malformed credential replies fail closed")
+
+
+if let path=ProcessInfo.processInfo.environment["PUSH_CAMPAIGN_YAML"] {
+    let campaignSource=try String(contentsOfFile:path,encoding:.utf8)
+    let policy=CLIConfig.parse(yaml:campaignSource)
+    check(policy.auth.promptUserForInstall && policy.auto.enabled && !policy.debug.dryRun,"campaign explicitly enables installation-only user authorization and monitoring")
+    check(policy.auto.trackLatest && policy.auto.minorOnly && policy.auto.enforceMinimumMajorVersion==26,"campaign tracks Tahoe while enforcing its major version on older Macs")
+    check(DiscoveryPolicy.eligible(version:"26.7.2",beta:false,current:"15.7",config:policy),"older supported Macs may upgrade into Tahoe")
+    check(!DiscoveryPolicy.eligible(version:"27.0",beta:false,current:"15.7",config:policy) && !DiscoveryPolicy.eligible(version:"27.0",beta:false,current:"26.7",config:policy),"Tahoe campaign never promotes older or Tahoe Macs to macOS 27")
+    check(!DiscoveryPolicy.eligible(version:"26.8",beta:true,current:"26.7",config:policy),"campaign excludes beta updates")
+    check(!DiscoveryPolicy.eligible(version:"15.8",beta:false,current:"15.7",config:policy),"an older-major security update does not satisfy the Tahoe campaign")
+    check(DiscoveryPolicy.eligible(version:"26.8",beta:false,current:"26.7",config:policy),"stable Tahoe point updates remain eligible")
+    check(policy.update.deadline=="2026-11-16T23:00:00Z" && policy.update.autoInstallAfterDeadline && !policy.update.silentInstallAfterDeadline,"deadline enforcement starts at the reviewed explicit UTC timestamp with visible awareness")
+    let central=DateFormatter();central.timeZone=TimeZone(identifier:"America/Chicago");central.dateFormat="yyyy-MM-dd HH:mm"
+    check(central.string(from:ISO8601DateFormatter().date(from:policy.update.deadline)!)=="2026-11-16 17:00","deadline is Monday November 16 at 5 PM Central, accounting for standard time")
+    check(policy.toastIntervalSeconds==3600 && policy.nudgeIntervalSeconds==86400 && !policy.schedule.respectAlertWindow && !policy.schedule.skipWeekends,"campaign has hourly toasts and daily reminders without weekday/hour restrictions")
+    check(!policy.apps.enabled && !policy.entra.enabled && !policy.uptime.enabled && !policy.compliance.wallpaperEnabled,"campaign leaves unrelated modules disabled")
+    var preserving="auth:\n  localAccount: \"fixture-managed-account\"\nui:\n  orgName: \"Fixture Org\"\n"
+    preserving=try ConfigCommand.upsertingConfig(preserving,key:"auth.promptUserForInstall",value:"true")
+    preserving=try ConfigCommand.upsertingConfig(preserving,key:"update.deadline",value:policy.update.deadline)
+    check(CLIConfig.parse(yaml:preserving).auth.localAccount=="fixture-managed-account" && CLIConfig.parse(yaml:preserving).ui.orgName=="Fixture Org","overlay scalar changes preserve endpoint account and branding")
+}
+
+
+check(InstallAuthorizationReply.trustedRequester(uid:0,realUID:0,path:"/usr/bin/sudo",pipe:true),"root installation launcher may request a private authorization prompt")
+check(!InstallAuthorizationReply.trustedRequester(uid:501,realUID:501,path:"/usr/bin/sudo",pipe:true),"unprivileged processes cannot request installation password UI")
+check(!InstallAuthorizationReply.trustedRequester(uid:0,realUID:501,path:"/usr/bin/sudo",pipe:true),"a user-initiated setuid launcher is not the root installation worker")
+check(!InstallAuthorizationReply.trustedRequester(uid:0,realUID:0,path:"/sbin/launchd",pipe:true),"generic LaunchAgent ancestry cannot unlock the credential prompt")
+check(!InstallAuthorizationReply.trustedRequester(uid:0,realUID:0,path:"/usr/bin/sudo",pipe:false),"credential replies cannot be written to a terminal or regular file")
+
+
+var boundedOS=CLIConfig.parse(yaml:"auto:\n  enabled: true\n  trackLatest: true\n  minorOnly: true\n  enforceMinimumMajorVersion: 26\n  maximumMajorVersion: 26\n")
+check(boundedOS.auto.maximumMajorVersion==26,"workflow generation ceiling round-trips through engine YAML")
+check(DiscoveryPolicy.eligible(version:"26.7.2",beta:false,current:"15.7",config:boundedOS),"generation-scoped workflows can upgrade older supported systems")
+check(!DiscoveryPolicy.eligible(version:"27.1",beta:false,current:"27.0",config:boundedOS),"a Tahoe workflow stays quiet if a Mac independently moves above its selected generation")
+check(!DiscoveryPolicy.eligible(version:"27.0",beta:false,current:"26.7",config:boundedOS),"generation ceiling cannot become a major upgrade")
+boundedOS.auto.maximumMajorVersion=0;boundedOS.auto.minorOnly=false
+check(DiscoveryPolicy.eligible(version:"27.1",beta:false,current:"26.7",config:boundedOS),"zero generation ceiling preserves existing unrestricted discovery behavior")
+
+
+let pipeOnly=runDirect("/bin/sh",["-c","printf fixture-cache-value; printf fixture-warning >&2"],discardStderr:true)
+check(pipeOnly.1==0 && pipeOnly.0=="fixture-cache-value","credential readers keep diagnostic stderr out of cached password bytes")
+
+// Popup launches use LaunchServices, while attempt-bound receipts preserve choices.
+let popupSession="push-ui-session-TEST"
+for code:Int32 in [0,1,2,3,4,5,6,7,99] {
+    let bytes=try JSONEncoder().encode(PopupResultReceipt(version:1,session:popupSession,code:code))
+    check(PopupResultReceipt.decode(bytes,session:popupSession)==code,"popup receipt retains response \(code) without interpreting launch success as consent")
+}
+let receiptBytes=try JSONEncoder().encode(PopupResultReceipt(version:1,session:popupSession,code:0))
+check(PopupResultReceipt.decode(receiptBytes,session:"another-attempt")==nil,"stale popup receipts cannot authorize a later attempt")
+check(PopupResultReceipt.decode(Data(),session:popupSession)==nil,"successful app opening without a response is not Install")
+check(PopupResultReceipt.decode(Data(repeating:32,count:4097),session:popupSession)==nil,"popup receipts are bounded before parsing")
+let invalidReceipt=try JSONEncoder().encode(PopupResultReceipt(version:2,session:popupSession,code:0))
+check(PopupResultReceipt.decode(invalidReceipt,session:popupSession)==nil,"unknown receipt protocols fail closed")
+let uiPath="/Library/Management/PUSH/push-ui.app/Contents/MacOS/push-ui"
+for command in ["'"+uiPath+"' --state toast", "\""+uiPath+"\" --state softNudge",uiPath+" --state rebootNudge"] {
+    let openCommand=PopupLaunchProtocol.openCommand(command:command,binary:uiPath,ready:"/private/tmp/example/ready",result:"/private/tmp/example/result")
+    check(openCommand?.contains("/usr/bin/open -n ")==true && openCommand?.contains(" -W ")==false && openCommand?.contains("--result-file")==true,"existing quoted UI commands launch through macOS with a result receipt")
+}
+check(PopupLaunchProtocol.openCommand(command:"/unrelated/app --state toast",binary:uiPath,ready:"r",result:"s")==nil,"a mismatched UI executable is rejected")
+
+check(PopupSessionPolicy.decision(visible:false,receipt:nil,launcherFailure:false,startupExpired:false,responseExpired:false) == .wait,"launcher success before visibility continues waiting instead of implying Install")
+check(PopupSessionPolicy.decision(visible:true,receipt:nil,launcherFailure:false,startupExpired:true,responseExpired:false) == .wait,"a visible popup keeps waiting for its receipt after the launcher exits")
+check(PopupSessionPolicy.decision(visible:true,receipt:1,launcherFailure:false,startupExpired:true,responseExpired:false) == .finish(1),"Later receipt completes the independent controller as Later")
+check(PopupSessionPolicy.decision(visible:false,receipt:0,launcherFailure:false,startupExpired:false,responseExpired:false) == .finish(103),"an Install receipt without visibility remains rejected")
+check(PopupSessionPolicy.decision(visible:false,receipt:nil,launcherFailure:false,startupExpired:true,responseExpired:false) == .finish(103),"missing visibility times out even after a successful launcher exit")
+check(PopupSessionPolicy.decision(visible:true,receipt:nil,launcherFailure:false,startupExpired:true,responseExpired:true) == .finish(100),"missing popup responses time out without installation consent")
+check(PopupSessionPolicy.decision(visible:false,receipt:nil,launcherFailure:true,startupExpired:false,responseExpired:false) == .finish(99),"a failed launch is never treated as a user choice")
+
+// Same-generation updates use Apple's offered point release, never a full fallback.
+let pointReleaseOffer="""
+Software Update Tool
+Finding available software
+Software Update found the following new or updated software:
+* Label: macOS 27.2.1-26B131
+    Title: macOS 27.2.1, Version: 27.2.1, Size: 6069131KiB, Recommended: YES, Action: restart,
+"""
+let pointOffer=NativeOSUpdate.parse(pointReleaseOffer).first!
+check(pointOffer.label=="macOS 27.2.1-26B131" && pointOffer.version=="27.2.1" && pointOffer.restart,"native parser retains Apple's complete label, version and restart action")
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:pointReleaseOffer) == .native(pointOffer),"27.2 minimum accepts Apple's native 27.2.1 offer")
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2.1",listing:pointReleaseOffer) == .native(pointOffer),"an exact point-release target remains eligible for native update")
+check(MacOSUpdateRouting.route(running:"15.7",target:"26.0",listing:pointReleaseOffer) == .fullInstaller,"15 to 26 remains a full-installer major upgrade")
+check(MacOSUpdateRouting.route(running:"27.2.1",target:"27.2",listing:pointReleaseOffer) == .compliant,"an already-compliant Mac does not download an older target")
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:"") != .fullInstaller,"an empty same-generation catalog never triggers a full-image fallback")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:pointReleaseOffer,catalogSucceeded:false) {check(true,"a failed Apple catalog query is blocked even when partial output contains an offer")}else{check(false,"a failed Apple catalog query is blocked even when partial output contains an offer")}
+let majorOnlyOffer=pointReleaseOffer.replacingOccurrences(of:"27.2.1",with:"28.0")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:majorOnlyOffer) {check(true,"native point-update selection cannot cross to a newer generation")}else{check(false,"native point-update selection cannot cross to a newer generation")}
+let oldOnlyOffer=pointReleaseOffer.replacingOccurrences(of:"27.2.1",with:"27.1")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:oldOnlyOffer) {check(true,"an offered native update below the minimum is rejected")}else{check(false,"an offered native update below the minimum is rejected")}
+let betaOffer=pointReleaseOffer.replacingOccurrences(of:"27.2.1",with:"27.3").replacingOccurrences(of:"Title: macOS 27.3",with:"Title: macOS 27.3 Beta")
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:betaOffer+"\n"+pointReleaseOffer) == .native(pointOffer),"default routing skips newer beta offers in favor of stable native updates")
+let betaParsed=NativeOSUpdate.parse(betaOffer).first!
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:betaOffer,skipBetas:false) == .native(betaParsed),"an explicitly beta-enabled policy retains its opt-in behavior")
+let newerOffer=pointReleaseOffer.replacingOccurrences(of:"27.2.1",with:"27.10")
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:pointReleaseOffer+"\n"+newerOffer) == .native(NativeOSUpdate.parse(newerOffer).first!),"numeric native offer ordering selects 27.10 above 27.2.1")
+let safariOffer=pointReleaseOffer.replacingOccurrences(of:"Title: macOS",with:"Title: Safari")
+check(NativeOSUpdate.parse(safariOffer).isEmpty,"unrelated app updates cannot masquerade as macOS updates by version")
+check(NativeOSUpdate.parse(pointReleaseOffer.replacingOccurrences(of:"27.2.1",with:"27.x")).isEmpty,"malformed native versions cannot enter the install route")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:pointReleaseOffer,maximumMajor:26) {check(true,"native routing honors the selected generation ceiling")}else{check(false,"native routing honors the selected generation ceiling")}
+let noRestartOffer=pointReleaseOffer.replacingOccurrences(of:"Action: restart,",with:"")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:noRestartOffer) {check(true,"installation routing retains its restart-qualified macOS offer requirement")}else{check(false,"installation routing retains its restart-qualified macOS offer requirement")}
+check(MacOSUpdateRouting.route(running:"27.0",target:"27.2",listing:noRestartOffer,restartOnly:false) == .native(NativeOSUpdate.parse(noRestartOffer).first!),"download-only preparation can use an eligible native offer without invoking restart")
+let rejectedLabel=pointReleaseOffer.replacingOccurrences(of:"Label: macOS 27.2.1-26B131",with:"Label: --all")
+check(NativeOSUpdate.parse(rejectedLabel).isEmpty,"option-like native labels cannot alter softwareupdate arguments")
+if case .unavailable = MacOSUpdateRouting.route(running:"27.0",target:"bad",listing:pointReleaseOffer) {check(true,"invalid policy targets fail before any route is selected")}else{check(false,"invalid policy targets fail before any route is selected")}
+var nativeVersionState=CLIDeferralState()
+nativeVersionState.beginInstallation(target:pointOffer.version,running:"27.0",boot:100)
+check(nativeVersionState.installTargetVersion=="27.2.1","reboot verification records the actual selected native point release")
+
+// Self Service selection uses fixtures only; no live catalog or authorization.
+let offerCandidates:[AutoCheckCommand.DetectedUpdate]=[
+    .init(version:"26.9",name:"macOS",isMajor:true,isBeta:false),
+    .init(version:"26.10",name:"macOS",isMajor:true,isBeta:false),
+    .init(version:"26.11",name:"macOS Beta",isMajor:true,isBeta:true),
+    .init(version:"27.2",name:"macOS",isMajor:true,isBeta:false)]
+check(SelfServiceOfferPolicy.latest(major:26,running:"15.7",updates:offerCandidates)?.version=="26.10","offer selects highest stable exact generation numerically")
+check(SelfServiceOfferPolicy.latest(major:26,running:"27.0",updates:offerCandidates)==nil,"offer never downgrades a newer generation")
+check(SelfServiceOfferPolicy.latest(major:26,running:"26.10",updates:offerCandidates)==nil,"offer does not reinstall the current release")
+check(SelfServiceOfferPolicy.latest(major:28,running:"26.0",updates:offerCandidates)==nil,"offer rejects unsupported generation selector")
+check(SelfServiceOfferPolicy.popupStates==Set(["downloading","preflightDisk","preflightPower","rebooting"]),"offer popup allowlist has only the four requested stages")
+var campaign=CLIConfig();campaign.update.deadline="2026-01-01T00:00:00Z";campaign.update.autoInstallAfterDeadline=true;campaign.auto.enabled=true;campaign.entra.enabled=true
+let isolated=SelfServiceOfferPolicy.isolated(campaign,major:26,version:"26.10",running:"15.7")!
+check(isolated.update.deadline.isEmpty && !isolated.update.autoInstallAfterDeadline && !isolated.auto.enabled && !isolated.entra.enabled && !isolated.apps.enabled && !isolated.uptime.enabled && !isolated.compliance.wallpaperEnabled,"offer disables all campaign enforcement and unrelated tasks")
+check(isolated.auth.promptUserForInstall && !isolated.debug.dryRun && isolated.auto.maximumMajorVersion==26,"offer permits existing user authorization within a fixed generation")
+check(campaign.auto.enabled && campaign.entra.enabled && !campaign.update.deadline.isEmpty,"offer isolation leaves original campaign intact")
+check(SelfServiceOfferPolicy.isolated(campaign,major:26,version:"27.0",running:"15.7")==nil,"offer rejects a mismatched selected version")
+var offerState=CLIDeferralState();offerState.deferralCount=3;offerState.beginInstallation(target:"26.10",running:"15.7",boot:1,origin:"selfService")
+check(offerState.installOrigin=="selfService" && offerState.deferralCount==3,"offer records install origin without resetting campaign deferrals")
+var installedAuthorization=CLIConfig();installedAuthorization.auth.localAccount="managed-admin";installedAuthorization.auth.localPassword="fixture-only";installedAuthorization.auto.enabled=true;installedAuthorization.update.deadline="2026-01-01T00:00:00Z"
+let authorizedOffer=SelfServiceOfferPolicy.withManagedAuthorization(isolated,installed:installedAuthorization)
+check(authorizedOffer.auth.localAccount=="managed-admin" && authorizedOffer.auth.localPassword.isEmpty && authorizedOffer.auth.promptUserForInstall,"offer prefers configured managed account with existing prompt as fallback, without importing plaintext local password")
+check(!authorizedOffer.auto.enabled && authorizedOffer.update.deadline.isEmpty,"authorization inheritance cannot reactivate campaign settings")
+check(installedAuthorization.auth.localPassword=="fixture-only" && installedAuthorization.auto.enabled,"authorization inheritance preserves installed policy")
+SelfServiceUpgradeCommand(args:["--major","26","--dry-run"]).run()
+check(true,"offer dry-run returns before root, configuration, catalog, Keychain and installer access")
+for (name,version,expected) in [("macOS 26","26","macOS 26"),("macOS 26","26.2.1","macOS 26.2.1"),("macOS Tahoe 26.0","26.2","macOS Tahoe 26.2"),("macOS Tahoe","26.2","macOS Tahoe 26.2"),("macOS","27.0","macOS 27.0"),("","27.1","macOS 27.1"),("macOS Tahoe","","macOS Tahoe")] {
+    check(DownloadWording.label(name:name,version:version)==expected,"download label avoids repeated generation: \(name) / \(version)")
+}
+check(DownloadWording.render("Preparing {macOS} · {version} · {osName}",name:"macOS Tahoe",version:"26.2")=="Preparing macOS Tahoe 26.2 · 26.2 · macOS Tahoe","download wording resolves supported release tokens")
+check(DownloadWording.render(" ",name:"macOS 26",version:"26",fallback:DownloadWording.title)=="Downloading macOS 26","blank download title falls back without duplicating the version")
+check(DownloadWording.render("Hello {unknown} $(touch /tmp/no) `none`",name:"macOS",version:"26")=="Hello {unknown} $(touch /tmp/no) `none`","download copy preserves unknown tokens and shell-like text as literal display content")
+check(DownloadWording.render("{osName} / {version}",name:"IT {version}",version:"26")=="IT {version} / 26","download tokens are expanded once without recursion")
+check(DownloadWording.render("🚀 {macOS} — {version}",name:"macOS",version:"26.2")=="🚀 macOS 26.2 — 26.2","download wording preserves Unicode with multiple replacements")
+let downloadConfiguration=CLIConfig.parse(yaml:"ui:\n  downloadHeader: \"From IT\"\n  downloadTitle: \"Preparing {macOS}\"\n  downloadingMessage: \"Continue working.\"\n  downloadFooter: \"Stay connected.\"\n")
+check(downloadConfiguration.ui.downloadHeader=="From IT" && downloadConfiguration.ui.downloadTitle=="Preparing {macOS}" && downloadConfiguration.ui.downloadingMessage=="Continue working." && downloadConfiguration.ui.downloadFooter=="Stay connected.","engine reads all editable download copy fields")
+
+// Quoted YAML scalars with trailing comments must not become deadline values.
+let quotedBlank="update:\n  deadline: \"\"  # Explicit ISO 8601 override; blank uses automatic\n"
+check(CLIConfig.parse(yaml:quotedBlank).update.deadline.isEmpty,"quoted blank deadline with trailing comment remains empty")
+check(CLIConfig.parse(yaml:"update:\n  deadline: '' # blank\n").update.deadline.isEmpty,"single-quoted blank deadline with comment remains empty")
+let commentedDate="2026-12-01T23:00:00Z"
+check(CLIConfig.parse(yaml:"update:\n  deadline: \"\(commentedDate)\" # IT deadline\n").update.deadline==commentedDate,"quoted explicit deadline retains exact timestamp and drops comment")
+let scalarEdges="""
+ui:
+  appName: "Team #1 \\"quoted\\"" # display name
+  orgName: 'Don''t remove # inside' # outside
+  helpURL: https://example.invalid/help#install # outside
+  accentColorHex: "#0A84FF" # color
+update:
+  deadline: "not-a-date" # still invalid
+"""
+let scalarConfig=CLIConfig.parse(yaml:scalarEdges)
+check(scalarConfig.ui.appName=="Team #1 \"quoted\"","hashes and escaped quotes inside strings survive comment stripping")
+check(scalarConfig.ui.orgName=="Don't remove # inside","doubled single quotes and embedded hashes are preserved")
+check(scalarConfig.ui.helpURL=="https://example.invalid/help#install","unquoted URL fragment survives a trailing YAML comment")
+check(scalarConfig.ui.accentColorHex=="#0A84FF","quoted color hash survives trailing comment")
+check(scalarConfig.update.deadline=="not-a-date","invalid nonblank deadlines remain invalid instead of silently cleared")
+let shippedTemplate=try String(contentsOfFile:"Packaging/default-config.yaml",encoding:.utf8)
+check(CLIConfig.parse(yaml:shippedTemplate).update.deadline.isEmpty,"actual shipped default config has an empty valid deadline override")
+let repairedBlank=try ConfigCommand.upsertingConfig(quotedBlank,key:"update.deadline",value:"")
+check(CLIConfig.parse(yaml:repairedBlank).update.deadline.isEmpty && !repairedBlank.contains("deadline: \"\"  #"),"config set empty deadline repairs the affected legacy scalar")
+check(CLIConfig.parse(yaml:"update:\n  targetVersion: \"26.10\" # preserve version\n").update.targetVersion=="26.10","quoted version strings preserve trailing digits instead of numeric coercion")
+// A harmless child drives the real prepare-complete signal path. It is not an
+// installer, uses no password, and cannot restart the computer.
+let observedRestartLock=NSLock()
+var observedRestarts=0,observedLiveChild=false
+let observedRestart=PreparedRestartObserver { process in
+    observedRestartLock.lock();observedRestarts+=1;observedLiveChild=process.isRunning;observedRestartLock.unlock()
+}
+let fixtureSignalScript="printf 'Preparing: 45.0%%\\n'; /bin/sleep 0.2; kill -USR1 \"$1\"; /bin/sleep 0.2; kill -USR1 \"$1\"; /bin/sleep 0.2"
+let observedProcess=runDirectStarted("/bin/sh",["-c",fixtureSignalScript,"fixture",String(getpid())],onStart:{process in observedRestart.started(process:process)})
+observedRestart.stop()
+observedRestartLock.lock();let restartCount=observedRestarts,liveAtRestart=observedLiveChild;observedRestartLock.unlock()
+check(observedProcess.1==0 && observedProcess.0.contains("Preparing: 45.0%"),"harmless child output is streamed while observing prepare-complete signal")
+check(restartCount==1,"duplicate preparation signals announce restart only once")
+check(liveAtRestart,"restart announcement is associated with a still-running child")
 
 print("Passed \(count) safe regression checks. No macOS installation commands were executed.")

@@ -1,3 +1,5 @@
+> Legacy companion source: retained for reference, but not included in current PUSH Client 1.16.7 or Admin-exported employee packages. Existing JamfCheckIn installations are left unchanged.
+
 # PUSH Client / Admin separation
 
 Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS

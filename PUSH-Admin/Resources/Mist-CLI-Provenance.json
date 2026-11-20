@@ -1,0 +1,10 @@
+{
+  "project": "mist-cli",
+  "developer": "Nindi Gill (ninxsoft)",
+  "version": "2.3",
+  "source": "https://github.com/ninxsoft/mist-cli/releases/tag/v2.3",
+  "url": "https://github.com/ninxsoft/mist-cli/releases/download/v2.3/mist-cli.2.3.pkg",
+  "sha256": "ad4200e342535e7744ed6db04226b28403fd44f4d031e255f1de8d532fc89a69",
+  "installerTeamID": "7K3HVCLV7Z",
+  "license": "MIT"
+}

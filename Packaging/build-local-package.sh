@@ -19,6 +19,8 @@ base="$stage/payload/Library/Management/PUSH"
 /bin/cp "$packaging/INSTALL-AND-TEST.txt" "$base/Local-Test/INSTALL-AND-TEST.txt"
 /bin/cp "$packaging/../LICENSE" "$base/Local-Test/LICENSE"
 /bin/cp "$packaging/resources/AppleHardwareCatalog.json" "$base/push-ui.app/Contents/Resources/AppleHardwareCatalog.json"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$base/push-ui.app/Contents/Info.plist")" == PUSH.icns ]] || { echo 'The PUSH icon metadata is missing; rebuild the app.' >&2; exit 1; }
+[[ -f "$base/push-ui.app/Contents/Resources/PUSH.icns" ]] || exit 1
 /bin/chmod 755 "$base/push-cli"
 /usr/bin/codesign --force --sign - --timestamp=none "$base/push-cli"
 /usr/bin/codesign --force --sign - --timestamp=none "$base/push-ui.app"
@@ -54,7 +56,7 @@ done
 /usr/bin/codesign --force --sign - --identifier com.push.notice --timestamp=none "$notice"
 /usr/bin/codesign --verify --deep --strict "$notice"
 
-printf '{"version":1,"minimumClient":"1.11.0"}\n' > "$base/user-request-protocol.json"
+printf '{"version":1,"minimumClient":"1.16.7"}\n' > "$base/user-request-protocol.json"
 
 /usr/bin/pkgbuild --analyze --root "$stage/payload" "$stage/components.plist"
 /usr/bin/plutil -replace 0.BundleIsRelocatable -bool NO "$stage/components.plist"
@@ -65,11 +67,11 @@ printf '{"version":1,"minimumClient":"1.11.0"}\n' > "$base/user-request-protocol
 /usr/bin/plutil -replace 2.BundleIsVersionChecked -bool NO "$stage/components.plist"
 /usr/bin/pkgbuild --root "$stage/payload" --component-plist "$stage/components.plist" \
     --scripts "$packaging/scripts" --ownership recommended \
-    --identifier com.push.pkg --version 1.11.0 --install-location / "$stage/push-component.pkg"
+    --identifier com.push.pkg --version 1.16.7 --install-location / "$stage/push-component.pkg"
 cat > "$stage/Distribution.xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-<title>PUSH 1.11.0 — Local Test</title>
+<title>PUSH 1.16.7 — Local Test</title>
 <organization>com.push</organization>
 <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
 <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
@@ -77,7 +79,7 @@ cat > "$stage/Distribution.xml" <<'XML'
 <welcome file="welcome.html" mime-type="text/html"/>
 <choices-outline><line choice="push"/></choices-outline>
 <choice id="push" visible="false"><pkg-ref id="com.push.pkg"/></choice>
-<pkg-ref id="com.push.pkg" version="1.11.0" onConclusion="none">push-component.pkg</pkg-ref>
+<pkg-ref id="com.push.pkg" version="1.16.7" onConclusion="none">push-component.pkg</pkg-ref>
 </installer-gui-script>
 XML
 /usr/bin/productbuild --distribution "$stage/Distribution.xml" --resources "$packaging/resources" \

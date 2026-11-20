@@ -1,0 +1,89 @@
+PUSH Admin 1.10.0 — Saved workflows and change review
+Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
+Matching client: PUSH 1.14.0, unchanged.
+
+INSTALL
+Quit PUSH Admin, install PUSH-Admin-1.10.0.pkg, and reopen Applications > PUSH Admin.
+This installs only the companion. No update policy is activated by this installer.
+
+SAVE A WORKFLOW
+Create Workflow now has a Saved workflows card above the five steps.
+Choose Save workflow, enter a name and select Save New Copy. The effective policy,
+workflow choices, custom messages, selected icon and custom wallpaper images are
+saved together. Saving again, even with the same name, creates another copy.
+Names and timestamps identify each copy. Nothing is silently overwritten.
+Known credential fields are removed. Keychain passwords are never read or copied.
+
+REUSE A WORKFLOW
+Choose a saved copy and select Load selected. After confirmation, the current
+draft is saved as a recovery copy before being replaced. No installed settings,
+services, desktop background or Keychain entries change. The saved source copy
+remains intact. Your custom wallpaper images are restored to Admin's image cache.
+Saved dates are preserved, not silently moved forward. Review the deadline and
+live/paused mode; a past deadline is blocked by the existing readiness checks.
+A broken/missing selected image must be corrected before saving or loading.
+
+COMPARE BEFORE BUILDING
+Choose a saved copy and select Compare with selected to use it as the comparison
+baseline without replacing your current policy or images. Alternatively, loading
+a workflow establishes that copy as the baseline automatically.
+Open step 5, Build, and read What changed before building. It shows the previous
+and new values, with enforcement-impacting changes first. Policy fields, messages,
+selected icon content and custom wallpaper references/content are compared.
+Changing an icon's bytes at the same deployed path is detected. Simple additional
+YAML fields are included. Major-offer demo presentation changes use a fingerprint.
+No baseline is shown as a first-package review, never as “nothing changed.”
+
+After a successful full configured-client build, the exact exported policy becomes
+this draft's baseline. Future edits are compared with that built package, even if
+you edited this same draft while the build ran. If you loaded a different draft
+while building, its baseline is not replaced. Failed/cancelled builds do not
+advance the baseline. This is last BUILT, not proof of installation on the fleet.
+
+Each reviewed configured build includes WORKFLOW-CHANGES.txt beside the installer,
+profiles and READ-ME-FIRST. Its checksum is recorded in manifest.json. It is a
+review document, not an install script. It compares policy/presentation values;
+installer binaries, signing identities, management profile identities, fleet
+state and Keychain contents are outside this comparison.
+
+STORAGE
+Saved copies remain on this Admin Mac in your user Application Support folder,
+under PUSH Admin/Saved Workflows. They use unique identifiers and private folder/
+file permissions. No saved workflows are shipped to employee Macs. Back up this
+Admin data if you want to keep the library independently of this machine.
+A current draft is still saved automatically using the existing mechanism.
+
+EXISTING WORKFLOW
+Choose goal > Customize > Simulate > Check readiness > Build remains unchanged.
+Messages and icon editing stay beside their preview. Simulation cannot perform
+an upgrade, read/save a password, open registration or restart the Mac. Build a
+NEW configured deployment folder to deploy changed policy or presentation.
+Employee packages exclude Admin. Existing Desktop projects, exported packages,
+installed policy and Keychain behavior are untouched.
+
+VERIFICATION LIMITS
+Offline checks cover safe archive persistence, image restoration, duplicate-copy
+preservation, legacy draft compatibility, comparison correctness and export
+manifest coverage. The app supports Intel and Apple silicon. No native app or
+popup was launched for you; native layout and interaction still need your manual
+test. No live installer, OS download, credential operation or restart was run.
+Local apps are ad-hoc signed and generated installers are unsigned. Verify your
+production signing, profiles and managed pilot before fleet deployment.
+
+Popup delivery patch: this Admin embeds Client 1.14.0. Update the actual endpoint
+client and rebuild old configured packages to deploy that fix. A standalone
+client installation preserves policy and pauses monitors for review.
+
+Client 1.14.0 polls popup responses independently of launcher completion and
+configures the window after attachment. Cancel waiting previews before applying
+the client installer, then test popup toast; that command cannot install macOS.
+
+Native verification update: the earlier 1.13.3 client UI was launched directly in display-
+only native tests. Candidate Later/Install/Close receipts and packaged UI Later
+were verified. Admin interface layout and end-to-end scheduled enforcement were
+not exercised. No live installation or credential access occurred.
+
+Routing update: Client 1.14.0 uses native Software Update for eligible same-major
+point releases. The target is a minimum; a newer point release can satisfy it.
+Only actual major upgrades automatically use full installers. Install this client
+after any currently active macOS installation and restart have finished.

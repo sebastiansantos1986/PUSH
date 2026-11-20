@@ -418,50 +418,42 @@ struct DownloadView: View {
     private var accent: Color { ctx.config.accentColor }
 
     var body: some View {
-        PopupCard(width: CGFloat(ctx.config.ui.popupWidth)) {
-            PopupHeader(config: ctx.config, subtitle: "Download in Progress")
+        PopupCard(width:CGFloat(ctx.config.ui.popupWidth),showTrafficLights:false){
+            PopupHeader(config:ctx.config,subtitle:ctx.config.downloadCopy(ctx.config.ui.downloadHeader,fallback:DownloadWording.header),compact:true)
             PushDivider()
-            VStack(spacing: 18) {
-                VStack(spacing: 5) {
-                    Text("Downloading \(ctx.config.friendlyTargetVersion)")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(liveSubtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                }
-
-                VStack(spacing: 8) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.primary.opacity(0.08))
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(accent)
-                                .frame(width: geo.size.width * liveProgress)
-                                .animation(.linear(duration: 1.5), value: liveProgress)
-                        }
+            VStack(alignment:.leading,spacing:22){
+                UpdateStageTrack(stage:0)
+                VStack(alignment:.leading,spacing:9){
+                    Text(ctx.config.downloadCopy(ctx.config.ui.downloadTitle,fallback:DownloadWording.title))
+                        .font(.system(size:23,weight:.semibold)).tracking(-0.4)
+                        .foregroundStyle(.primary).fixedSize(horizontal:false,vertical:true)
+                    if !ctx.config.ui.downloadingMessage.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                        Text(ctx.config.downloadCopy(ctx.config.ui.downloadingMessage))
+                            .font(.system(size:13)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal:false,vertical:true).lineSpacing(3)
                     }
-                    .frame(height: 6)
-                    HStack {
-                        Text("\(Int(liveProgress * 100))%")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(accent)
+                }
+                VStack(alignment:.leading,spacing:12){
+                    HStack(alignment:.firstTextBaseline){
+                        Text("Download progress").font(.system(size:12,weight:.medium)).foregroundStyle(.secondary)
                         Spacer()
-                        Text(ctx.config.friendlyTargetVersion)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color(NSColor.tertiaryLabelColor))
+                        Text("\(Int(liveProgress*100))%")
+                            .font(.system(size:27,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(accent)
                     }
+                    GeometryReader{geo in
+                        ZStack(alignment:.leading){
+                            Capsule().fill(Color.primary.opacity(0.08))
+                            Capsule().fill(accent).frame(width:geo.size.width*liveProgress)
+                                .animation(.linear(duration:1.5),value:liveProgress)
+                        }
+                    }.frame(height:8)
+                    Text(liveSubtitle).font(.system(size:12)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal:false,vertical:true).lineSpacing(2)
                 }
-
-                Text("Please keep your Mac plugged in · Do not shut down or close the lid")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color(NSColor.tertiaryLabelColor))
-                    .multilineTextAlignment(.center)
-            }
-            .padding(24)
+                if !ctx.config.ui.downloadFooter.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                    UpdateGuidance(text:ctx.config.downloadCopy(ctx.config.ui.downloadFooter))
+                }
+            }.padding(26)
         }
         .onAppear {
             liveProgress = ctx.downloadProgress
@@ -496,57 +488,40 @@ struct InstallingView: View {
     private let progressFile = "/dev/null"
 
     var body: some View {
-        PopupCard(width: CGFloat(ctx.config.ui.popupWidth)) {
-            PopupHeader(config: ctx.config, subtitle: "Installation in Progress")
+        PopupCard(width:CGFloat(ctx.config.ui.popupWidth),showTrafficLights:false){
+            PopupHeader(config:ctx.config,subtitle:"Installation preparation",compact:true)
             PushDivider()
-            VStack(spacing: 20) {
-                VStack(spacing: 6) {
-                    Text("Installing\(String(repeating: ".", count: dotCount))")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    if ctx.quickRestart || !subtitle.isEmpty {
-                        Text(subtitle.isEmpty ? "Preparing installation…" : subtitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                            .multilineTextAlignment(.center)
-                            .animation(.easeInOut, value: subtitle)
-                    } else {
-                        let msg = ctx.config.ui.installingMessage.isEmpty
-                            ? "macOS is being installed on your Mac.\n\nThis process takes approximately 30–45 minutes. Your Mac will restart automatically when the installation is complete.\n\nPlease keep your Mac powered on and plugged in."
-                            : ctx.config.ui.installingMessage
-                        RichMessage(text: msg, fontSize: 13,
-                                    color: Color(NSColor.secondaryLabelColor))
+            VStack(alignment:.leading,spacing:22){
+                UpdateStageTrack(stage:1)
+                VStack(alignment:.leading,spacing:9){
+                    Text(ctx.isSelfServiceOffer ? "Preparing your Mac":"Preparing the update")
+                        .font(.system(size:23,weight:.semibold)).tracking(-0.4)
+                    Text(ctx.config.friendlyTargetVersion).font(.system(size:13)).foregroundStyle(.secondary)
+                    if !ctx.config.ui.installingMessage.isEmpty {
+                        RichMessage(text:ctx.config.ui.installingMessage,fontSize:13,color:Color(NSColor.secondaryLabelColor))
                     }
                 }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.07))
-                        if progress > 0.009 {
-                            RoundedRectangle(cornerRadius: 3).fill(Color.green)
-                                .frame(width: geo.size.width * progress)
-                                .animation(.linear(duration: 1.5), value: progress)
-                        } else {
-                            let pulseWidth = geo.size.width * 0.25
-                            let maxOffset  = geo.size.width - pulseWidth
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.green.opacity(0.6))
-                                .frame(width: pulseWidth)
-                                .offset(x: pulseOffset * maxOffset)
+                VStack(alignment:.leading,spacing:12){
+                    HStack(alignment:.firstTextBaseline){
+                        Text("Installation preparation").font(.system(size:12,weight:.medium)).foregroundStyle(.secondary)
+                        Spacer()
+                        if progress>0.009 {Text("\(Int(progress*100))%").font(.system(size:27,weight:.semibold,design:.rounded)).monospacedDigit().foregroundStyle(ctx.config.accentColor)}
+                    }
+                    GeometryReader{geo in
+                        ZStack(alignment:.leading){
+                            Capsule().fill(Color.primary.opacity(0.08))
+                            if progress>0.009 {
+                                Capsule().fill(ctx.config.accentColor).frame(width:geo.size.width*progress).animation(.linear(duration:1.5),value:progress)
+                            }else{
+                                Capsule().fill(ctx.config.accentColor.opacity(0.65)).frame(width:geo.size.width*0.25).offset(x:pulseOffset*geo.size.width*0.75)
+                            }
                         }
-                    }
+                    }.frame(height:8)
+                    Text(subtitle.isEmpty ? "Getting everything ready. Your Mac will restart when preparation is complete.":subtitle)
+                        .font(.system(size:12)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true).lineSpacing(2)
                 }
-                .frame(height: 6)
-                VStack(spacing: 4) {
-                    Text("⚠️  Do not shut down or unplug your Mac during installation")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.orange.opacity(0.9))
-                        .multilineTextAlignment(.center)
-                    Text("Your Mac will restart automatically when ready")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(NSColor.tertiaryLabelColor))
-                }
-            }
-            .padding(24)
+                UpdateGuidance(text:"Keep your Mac connected to power. Do not shut down or close the lid during preparation.")
+            }.padding(26)
         }
         .onReceive(ticker) { _ in dotCount = dotCount % 3 + 1 }
         .onReceive(poller) { _ in
@@ -562,15 +537,10 @@ struct InstallingView: View {
     }
 
     private func pollProgress() {
-        guard let raw = try? String(contentsOfFile: progressFile, encoding: .utf8) else { return }
-        let parts = raw.components(separatedBy: "\n")
-        if let pct = Double(parts[0].trimmingCharacters(in: .whitespaces)) {
-            progress = min(1.0, max(0.0, pct))
-        }
-        if parts.count > 1 {
-            subtitle = parts[1].trimmingCharacters(in: .whitespaces)
-        }
+        progress=ctx.downloadProgress
+        subtitle="SIMULATED · Preparing macOS installation… \(Int(progress*100))%"
     }
+
 }
 
 // MARK: ── Rebooting ───────────────────────────────────────────────────────────
@@ -582,34 +552,26 @@ struct RebootingView: View {
     private var accent: Color { ctx.config.accentColor }
 
     var body: some View {
-        PopupCard(width: CGFloat(ctx.config.ui.popupWidth)) {
-            PopupHeader(config: ctx.config, subtitle: "Restart Required")
+        PopupCard(width:CGFloat(ctx.config.ui.popupWidth),showTrafficLights:false){
+            PopupHeader(config:ctx.config,subtitle:ctx.restartPrepared ? "Ready to restart":"Restart required",compact:true)
             PushDivider()
-            VStack(spacing: 18) {
-                VStack(spacing: 4) {
-                    Text("\(secondsLeft)")
-                        .font(.system(size: 52, weight: .thin, design: .monospaced))
-                        .foregroundStyle(accent)
-                        .contentTransition(.numericText())
-                    Text("seconds until automatic restart")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(NSColor.tertiaryLabelColor))
+            VStack(spacing:22){
+                if ctx.restartPrepared {UpdateStageTrack(stage:2)}
+                VStack(spacing:8){
+                    Text(ctx.isSelfServiceOffer && !ctx.restartPrepared ? "Ready for installation":"Your Mac is ready to restart")
+                        .font(.system(size:23,weight:.semibold)).tracking(-0.4).multilineTextAlignment(.center)
+                    Text(ctx.isSelfServiceOffer && !ctx.restartPrepared ? "The download is ready. Save your work now. Installation begins next, and macOS will restart when ready.":"Save your work now. Your Mac will restart to finish the macOS update.")
+                        .font(.system(size:13)).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal:false,vertical:true).lineSpacing(3)
                 }
-
-                Text("Your Mac will restart to complete the update.\nSave any open work now.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color(NSColor.secondaryLabelColor))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-
-                CountdownDrainBar(progress: Double(secondsLeft) / 60.0, color: accent)
-                    .padding(.horizontal, 4)
-
-                PrimaryActionButton(label: "Restart Now",
-                                    icon: "restart.circle.fill",
-                                    color: accent) { ctx.exit(.install) }
-            }
-            .padding(24)
+                VStack(spacing:5){
+                    Text("\(secondsLeft)").font(.system(size:52,weight:.medium,design:.rounded)).monospacedDigit().foregroundStyle(accent).contentTransition(.numericText())
+                    Text(ctx.isSelfServiceOffer && !ctx.restartPrepared ? "seconds until installation begins":"seconds until restart")
+                        .font(.system(size:12)).foregroundStyle(.secondary)
+                }.frame(maxWidth:.infinity).padding(.vertical,16)
+                    .background(accent.opacity(0.06),in:RoundedRectangle(cornerRadius:16))
+                CountdownDrainBar(progress:Double(secondsLeft)/60.0,color:accent)
+                PrimaryActionButton(label:ctx.isSelfServiceOffer && !ctx.restartPrepared ? "Continue":"Restart now",icon:"restart.circle.fill",color:accent){ctx.exit(.install)}
+            }.padding(26)
         }
         .onReceive(timer) { _ in
             if secondsLeft > 0 { secondsLeft -= 1 }

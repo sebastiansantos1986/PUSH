@@ -76,3 +76,71 @@ enum WallpaperPolicy {
         return role+"-"+digest+".png"
     }
 }
+
+// LaunchServices does not return the application's button exit code. Use an
+// attempt-bound receipt; a successful open(1) exit is never installation consent.
+struct PopupResultReceipt:Codable {
+    let version:Int
+    let session:String
+    let code:Int32
+    static func decode(_ data:Data,session:String)->Int32? {
+        guard data.count<=4096,let value=try? JSONDecoder().decode(Self.self,from:data),value.version==1,value.session==session,([0,1,2,3,4,5,6,7,99] as [Int32]).contains(value.code) else{return nil}
+        return value.code
+    }
+}
+enum PopupLaunchProtocol {
+    static func openCommand(command:String,binary:String,ready:String,result:String,output:String?=nil)->String? {
+        let quote:(String)->String={"'"+$0.replacingOccurrences(of:"'",with:"'\\''")+"'"}
+        let prefixes=[quote(binary),"\""+binary+"\"",binary]
+        guard let prefix=prefixes.first(where:{command==$0 || command.hasPrefix($0+" ")}),let split=binary.range(of:"/Contents/MacOS/"),binary[..<split.lowerBound].hasSuffix(".app") else{return nil}
+        let app=String(binary[..<split.lowerBound])
+        let arguments=String(command.dropFirst(prefix.count))
+        let logs=output.map{" --stdout "+quote($0)+" --stderr "+quote($0)} ?? ""
+        return "exec /usr/bin/open -n"+logs+" "+quote(app)+" --args"+arguments+" --ready-file "+quote(ready)+" --result-file "+quote(result)
+    }
+}
+
+// Launcher completion and popup completion are independent. LaunchServices may
+// return before a window exists; only an acknowledged, valid receipt is a choice.
+enum PopupSessionDecision:Equatable {case wait,finish(Int32)}
+enum PopupSessionPolicy {
+    static func decision(visible:Bool,receipt:Int32?,launcherFailure:Bool,startupExpired:Bool,responseExpired:Bool)->PopupSessionDecision {
+        if let receipt {return .finish(visible ? receipt:103)}
+        if launcherFailure {return .finish(99)}
+        if !visible && startupExpired {return .finish(103)}
+        if responseExpired {return .finish(100)}
+        return .wait
+    }
+}
+
+/// Display copy is separate from installer/progress data. Templates never execute.
+enum DownloadWording {
+    static let header="Download in Progress"
+    static let title="Downloading {macOS}"
+    static let message="You can keep working while your update downloads."
+    static let footer="Keep your Mac connected to power and the internet. Do not shut down or close the lid."
+    static func label(name:String,version:String)->String {
+        let clean=name.trimmingCharacters(in:.whitespacesAndNewlines)
+        let os=clean.isEmpty ? "macOS":clean
+        let target=version.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !target.isEmpty else{return os}
+        var words=os.split(whereSeparator:{$0.isWhitespace}).map(String.init)
+        if let last=words.last,last.range(of:#"^[0-9]+(?:\.[0-9]+){0,2}$"#,options:.regularExpression) != nil,
+           last.split(separator:".").first==target.split(separator:".").first {
+            words.removeLast();return (words+[target]).joined(separator:" ")
+        }
+        return os+" "+target
+    }
+    static func render(_ template:String,name:String,version:String,fallback:String="")->String {
+        let source=template.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? fallback:template
+        let tokens=["macOS":label(name:name,version:version),"version":version,"osName":name.isEmpty ? "macOS":name]
+        // One pass prevents token-like text inside an admin name from being expanded again.
+        guard let regex=try? NSRegularExpression(pattern:#"\{(macOS|version|osName)\}"#) else{return source}
+        var result=source
+        for match in regex.matches(in:source,range:NSRange(source.startIndex...,in:source)).reversed() {
+            guard let range=Range(match.range,in:result),let keyRange=Range(match.range(at:1),in:source),let value=tokens[String(source[keyRange])] else{continue}
+            result.replaceSubrange(range,with:value)
+        }
+        return result
+    }
+}

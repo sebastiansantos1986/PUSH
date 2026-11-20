@@ -31,6 +31,7 @@ struct DownloadCommand {
             cliError("Cannot load config"); exit(1)
         }
 
+        if config.debug.dryRun {cliPrint("Dry run: would choose the macOS download route. No download started.");return}
         let version = config.update.targetVersion
         guard numericOSVersion(version) != nil else {
             cliError("No target version set. Run: sudo push-cli config set update.targetVersion <version>"); exit(1)
@@ -50,30 +51,25 @@ struct DownloadCommand {
     // MARK: - Auto
 
     private func runAuto(config: CLIConfig, version: String) {
-        // Try softwareupdate first; fall back to mist-cli
-        cliPrint("Auto-detecting best download method…")
-        let (swuOut, _) = shell("/usr/sbin/softwareupdate --list 2>&1")
-        let labelOpt = parseSWULabel(version: version, output: swuOut)
-
-        if let label = labelOpt {
-            cliInfo("Found via softwareupdate:", label)
-            runNativeWithLabel(label: label, config: config)
-        } else {
-            cliInfo("Not found via softwareupdate — trying mist-cli…", "")
-            runMist(config: config, version: version)
+        let listing=nativeOSUpdateCatalog()
+        switch MacOSUpdateRouting.route(running:currentMacOSVersion(),target:version,listing:listing.0,catalogSucceeded:listing.1==0,maximumMajor:config.auto.maximumMajorVersion,skipBetas:config.auto.skipBetas,restartOnly:false) {
+        case .native(let update):cliInfo("Native macOS offer:",update.version);runNativeWithLabel(label:update.label,config:config)
+        case .fullInstaller:runMist(config:config,version:version)
+        case .compliant:cliSuccess("This Mac already meets the requested macOS target.")
+        case .unavailable(let reason):cliError(reason)
         }
     }
 
     // MARK: - Native (softwareupdate)
 
-    private func runNative(config: CLIConfig, version: String) {
-        let (swuOut, _) = shell("/usr/sbin/softwareupdate --list 2>&1")
-        guard let label = parseSWULabel(version: version, output: swuOut) else {
-            cliError("Version \(version) not found in softwareupdate --list")
-            cliPrint("Try: push-cli download --method mist")
-            exit(1)
+    private func runNative(config:CLIConfig,version:String) {
+        let listing=nativeOSUpdateCatalog()
+        switch MacOSUpdateRouting.route(running:currentMacOSVersion(),target:version,listing:listing.0,catalogSucceeded:listing.1==0,maximumMajor:config.auto.maximumMajorVersion,skipBetas:config.auto.skipBetas,restartOnly:false) {
+        case .native(let update):runNativeWithLabel(label:update.label,config:config)
+        case .compliant:cliSuccess("This Mac already meets the requested macOS target.")
+        case .fullInstaller:cliError("A major upgrade requires the full-installer download route. Use auto or your explicit mist method.")
+        case .unavailable(let reason):cliError(reason)
         }
-        runNativeWithLabel(label: label, config: config)
     }
 
     private func runNativeWithLabel(label: String, config: CLIConfig) {
@@ -176,9 +172,9 @@ struct DownloadCommand {
         let betaFlag = isBeta ? "--include-betas" : ""
         let appName  = "Install %NAME%.app"
         let dlDir    = "\(managedBase)/downloads"
-        shell("mkdir -p \"\(dlDir)\"")
+        guard AppleInstallerTrust.prepareDownloadDirectory() else { cliError("PUSH could not prepare its protected installer download folder."); exit(1) }
 
-        let cmd = "\"\(mist)\" download installer --force --no-ansi --output-directory \"/Applications\" --compatible \(betaFlag) \"\(build)\" application --application-name \"\(appName)\""
+        let cmd = "\"\(mist)\" download installer --force --no-ansi --output-directory \"\(dlDir)\" --compatible \(betaFlag) \"\(build)\" application --application-name \"\(appName)\""
         cliLog("[Download] Running mist-cli: \(cmd)")
         cliPrint("Downloading via mist-cli… (this may take a while)")
 

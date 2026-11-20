@@ -50,10 +50,11 @@ struct AutoCheckCommand {
             cliError("Choose exactly one action: check, notify, or install."); return
         }
         guard getuid() == 0 else { cliError("Run this command with sudo to save discovery results."); return }
-        guard config.auto.enabled || isForced else { cliPrint("Auto-detection is disabled."); return }
+        let runOSChecks=config.auto.enabled || isForced
+        guard runOSChecks || config.uptime.enabled else { cliPrint("Auto-detection is disabled."); return }
         let audit = RuntimeHealthScope(module:"macos",scheduled:args.contains("--scheduled"))
         defer { audit.finish() }
-        guard config.update.deadline.isEmpty || ISO8601DateFormatter().date(from: config.effectiveDeadline) != nil else {
+        guard !runOSChecks || config.update.deadline.isEmpty || ISO8601DateFormatter().date(from: config.effectiveDeadline) != nil else {
             cliError("update.deadline must include an ISO 8601 date, time, and time zone."); return
         }
         try? FileManager.default.createDirectory(atPath: managedBase, withIntermediateDirectories: true)
@@ -65,6 +66,7 @@ struct AutoCheckCommand {
         LogRotation.rotateIfNeeded(config: config)
         cliLog("[AutoCheck] Starting checkOnly:\(checkOnly) notifyOnly:\(notifyOnly) installNow:\(installNow) force:\(isForced)")
 
+        if !runOSChecks {performUptimeCheck(config:config);return}
         let current = currentMacOSVersion()
         guard var health = try? loadStateForAction() else {
             cliError("Saved installation state is unreadable. Restore its backup before running update actions."); return
@@ -84,7 +86,7 @@ struct AutoCheckCommand {
                 InstallRecoveryStore.failure(config:config,message:"The Mac restarted but did not reach the required macOS version. The update needs another installation attempt.")
             }
             if !checkOnly && health.installCompleted && !oldState.installCompleted {
-                NotificationManager(config: config).notifyInstallComplete(version: current, previousVersion: oldState.lastSeenVersion)
+                if oldState.installOrigin != "selfService" {NotificationManager(config:config).notifyInstallComplete(version:current,previousVersion:oldState.lastSeenVersion)}
                 if FileManager.default.isExecutableFile(atPath: config.jamf.binaryPath) {
                     _ = runDirect(config.jamf.binaryPath, ["recon"])
                 }
@@ -123,7 +125,7 @@ struct AutoCheckCommand {
             }
             best = available.first { sameOSVersion($0.version, config.update.targetVersion) }
                 ?? DetectedUpdate(version: config.update.targetVersion, name: config.update.macOSName,
-                    isMajor: config.isMajor, isBeta: false)
+                    isMajor: (Int(config.update.targetVersion.split(separator:".").first ?? "0") ?? 0)>currentMajor, isBeta: false)
         } else { best = pickBestUpdate(from: available, config: config, current: current) }
         guard let best else {
             if let issue = loadState().lastDiscoveryError, !issue.isEmpty { cliWarning("Discovery incomplete: \(issue)") }
@@ -383,7 +385,7 @@ struct AutoCheckCommand {
         guard let cfgPath=resolvedConfigPath,FileManager.default.fileExists(atPath:resolveUIBinary()) else {return false}
         shell("pkill -x push-ui 2>/dev/null || true")
         let response=runUIBlocking(shellArgument(resolveUIBinary())+" --state toast --deadline-notice --config "+shellArgument(cfgPath),timeoutMinutes:1)
-        guard state.recordToastResult(response,interval:config.toastIntervalSeconds,target:config.update.targetVersion) else {return false}
+        guard state.recordToastResult(response,interval:config.toastIntervalSeconds,target:config.update.targetVersion) else {state.queueAwareness();try? saveState(state);return false}
         state.deadlineNoticeShownAt=Date();state.deadlineNoticeTarget=config.update.targetVersion
         do {try saveState(state);return true}catch {cliError("Could not save deadline-notice evidence.");return false}
     }

@@ -92,12 +92,12 @@ struct DashboardHours {
     }
 }
 struct InstalledPolicySummary {
-    var macEnabled: Bool, appsEnabled: Bool, entraEnabled: Bool, dryRun: Bool
+    var macEnabled: Bool, appsEnabled: Bool, entraEnabled: Bool, uptimeEnabled:Bool, dryRun: Bool
     var target: String, deadline: Date?, tracking: Bool
     var macHours: DashboardHours, entraHours: DashboardHours
     var approved: [String], autoClosed: Bool, appReminders: Bool, providerPath: String
     init(_ config: DashboardConfig) {
-        macEnabled=config.auto.enabled;appsEnabled=config.apps.enabled;entraEnabled=config.entra.enabled;dryRun=config.debug.dryRun
+        macEnabled=config.auto.enabled;appsEnabled=config.apps.enabled;entraEnabled=config.entra.enabled;uptimeEnabled=config.uptime.enabled;dryRun=config.debug.dryRun
         target=config.update.targetVersion;deadline=ISO8601DateFormatter().date(from:config.effectiveDeadline);tracking=config.auto.trackLatest
         macHours = .init(start:config.schedule.alertStartHour,end:config.schedule.alertEndHour,weekdays:config.schedule.skipWeekends,restricted:config.schedule.respectAlertWindow)
         entraHours = .init(start:config.entra.startHour,end:config.entra.endHour,weekdays:config.entra.weekdaysOnly)
@@ -151,7 +151,7 @@ struct ReadinessSnapshot {
         if configIssue != nil { return "The installed policy needs attention" }
         guard let policy else { return "No installed policy is available" }
         if policy.dryRun { return "Dry-run policy · no live prompts or updates" }
-        let needsMain = policy.macEnabled || policy.appsEnabled
+        let needsMain = policy.macEnabled || policy.appsEnabled || policy.uptimeEnabled
         let needsEntra = policy.entraEnabled && entra?.status != .notApplicable
         if needsMain && mainMonitor.blocksAutomation || needsEntra && entraMonitor.blocksAutomation { return "Scheduled reminders are not fully active" }
         if needsMain && mainMonitor.tone == .attention || needsEntra && entraMonitor.tone == .attention { return "Monitoring needs attention" }
@@ -163,7 +163,7 @@ struct ReadinessSnapshot {
         if let configIssue { return configIssue }
         guard let policy else { return "Import or apply a configuration before activating monitoring." }
         if policy.dryRun { return "The installed configuration is in dry-run mode. A loaded monitor will not run live discovery, prompts, or installations." }
-        if (policy.macEnabled || policy.appsEnabled) && mainMonitor.blocksAutomation { return "macOS/app monitoring: " + mainMonitor.reason }
+        if (policy.macEnabled || policy.appsEnabled || policy.uptimeEnabled) && mainMonitor.blocksAutomation { return "macOS/app monitoring: " + mainMonitor.reason }
         if policy.entraEnabled && entra?.status != .notApplicable && entraMonitor.blocksAutomation { return "Registration monitoring: " + entraMonitor.reason }
         return "This is the installed policy and saved evidence—not the unsaved draft. Refresh reads local files and service status only."
     }

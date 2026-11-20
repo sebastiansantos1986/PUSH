@@ -12,7 +12,7 @@ struct DeploymentExportCard:View {
     var body:some View {
         AdminCard {
             Label("Build the complete client installer",systemImage:"shippingbox.fill").font(.headline)
-            Text("Build one installer with PUSH, JamfCheckIn, this draft’s YAML and selected images. PUSH Admin stays on IT workstations. MDM profiles accompany the installer as separate files.").font(.callout).foregroundStyle(.secondary)
+            Text("Build one installer with PUSH, this draft’s YAML and selected images. JamfCheckIn is not included. PUSH Admin stays on IT workstations. MDM profiles accompany the installer as separate files.").font(.callout).foregroundStyle(.secondary)
             TextField("Apple Developer Team ID · optional for local testing",text:$teamID).textFieldStyle(.roundedBorder)
             Text("A Team ID narrows background-item approval; it does not sign the installer. The included local client is ad-hoc signed. Use your verified Developer ID release for fleet deployment.").font(.caption).foregroundStyle(.secondary)
             if store.document.setupFlag("uptime.enabled") {
@@ -40,7 +40,7 @@ struct DeploymentExportCard:View {
 extension AdminStore {
     func exportDeploymentBundle(teamID:String,restartIdentity:RestartProfileIdentity?=nil) {
         guard document.problems.isEmpty else {notice="Resolve draft validation issues before exporting.";return}
-        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.11.0",withExtension:"pkg") else {notice="The matching client installer is missing from PUSH Admin. Reinstall version 1.1.0.";return}
+        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.16.7",withExtension:"pkg") else {notice="The matching client installer is missing from PUSH Admin. Reinstall version 1.1.0.";return}
         do {
             let input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity)
             let panel=NSSavePanel();panel.nameFieldStringValue="PUSH-Deployment-"+Date().formatted(.iso8601.year().month().day().dateSeparator(.dash));panel.title="Export a new deployment folder";panel.message="Choose a new folder name. Existing exports are never replaced.";panel.canCreateDirectories=true
@@ -78,13 +78,17 @@ extension AdminStore {
         // Sanitize even edited drafts before bundling; never export known credential fields.
         let safe=ConfigDocument.load(document.yaml,name:"Deployment export")
         guard safe.problems.isEmpty else {throw DeploymentBundleError.invalid("The sanitized deployment policy did not validate.")}
-        return .init(yaml:safe.yaml,assets:images,teamID:teamID.trimmingCharacters(in:.whitespacesAndNewlines),restartIdentity:document.setupFlag("uptime.enabled") ? restartIdentity:nil,majorSettings:try majorSettings.validated(),hardwareCatalog:AppleHardwareReader.bundled())
+        var result=DeploymentBundleInput(yaml:safe.yaml,assets:images,teamID:teamID.trimmingCharacters(in:.whitespacesAndNewlines),restartIdentity:document.setupFlag("uptime.enabled") ? restartIdentity:nil,majorSettings:try majorSettings.validated(),hardwareCatalog:AppleHardwareReader.bundled())
+        if document.workflowRecipe?.includeTahoeAudit == true {
+            let (package,script)=try tahoeReporterData();result.hardwareReporterPackage=package;result.hardwareInventoryScript=script
+        }
+        return result
     }
-    func buildConfiguredClient(teamID:String,restartIdentity:RestartProfileIdentity?,activation:ClientActivation,scope:ClientPackageScope = .full) {
+    func buildConfiguredClient(teamID:String,restartIdentity:RestartProfileIdentity?,activation:ClientActivation,scope:ClientPackageScope = .full,clientOverride:URL? = nil) {
         guard !isBuildingDeployment else{return}
-        guard let client=Bundle.main.url(forResource:"PUSH-Client-1.11.0",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.3.0.";return}
+        guard let client=clientOverride ?? Bundle.main.url(forResource:"PUSH-Client-1.16.7",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.16.10.";return}
         do {
-            let input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity,scope:scope)
+            var input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity,scope:scope)
             let reviewed=ConfigDocument.load(input.yaml,name:"Package review")
             try ConfiguredClientBuilder.validate(reviewed,activation:activation)
             let review=NSAlert();review.messageText="Build the reviewed client installer?"
@@ -93,13 +97,22 @@ extension AdminStore {
             guard review.runModal() == .alertFirstButtonReturn else{return}
             let panel=NSSavePanel();panel.nameFieldStringValue="PUSH-Configured-Deployment";panel.title="Choose a new output folder";panel.message="The installer, profiles and review files will be saved together. Existing folders are never replaced.";panel.canCreateDirectories=true
             guard panel.runModal() == .OK,let destination=panel.url else{return}
+            var packaged=ConfigDocument.load(input.yaml,name:"Packaged policy")
+            packaged.workflowRecipe=document.workflowRecipe;packaged.majorOfferSettings=input.majorSettings
+            packaged.logoImageData=document.logoImageData;packaged.wallpaperAssets=document.wallpaperAssets
+            let builtBaseline=WorkflowBaseline.capture(packaged,name:"Built package: "+destination.lastPathComponent,assets:input.assets)
+            input.workflowChangeReport=WorkflowComparison(baseline:scope == .full ? document.workflowBaseline:nil,current:builtBaseline).report
+            if document.workflowDraftID==nil {document.workflowDraftID=UUID()}
+            let draftIdentity=document.workflowDraftID
+            let frozenInput=input
             isBuildingDeployment=true;notice="Building the reviewed client installer. No installed settings or services are changing."
             Task {
                 let result=await Task.detached(priority:.userInitiated){()->String? in
-                    do {try ConfiguredClientBuilder.build(input,client:client,activation:activation,scope:scope,to:destination);return nil}catch{return error.localizedDescription}
+                    do {try ConfiguredClientBuilder.build(frozenInput,client:client,activation:activation,scope:scope,to:destination);return nil}catch{return error.localizedDescription}
                 }.value
                 isBuildingDeployment=false
-                notice=result.map{"Installer build failed: "+$0} ?? "Built the selected client profile with reviewed policy and presentation. See its READ-ME-FIRST. Nothing was installed or activated on this Mac."
+                if result==nil && scope == .full && document.workflowDraftID==draftIdentity {document.workflowBaseline=builtBaseline}
+                notice=result.map{"Installer build failed: "+$0} ?? "Built the selected client profile with reviewed policy and presentation. See READ-ME-FIRST and WORKFLOW-CHANGES. Nothing was installed or activated on this Mac."
             }
         }catch {notice="Review before building: "+error.localizedDescription}
     }

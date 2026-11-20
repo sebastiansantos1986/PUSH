@@ -20,7 +20,7 @@ struct MajorUpgradeDemoCommand {
         do {options=try .parse(args,defaults:try MajorOfferSettings.installed().options)}catch{fputs(error.localizedDescription+"\n"+Self.usage+"\n",stderr);Foundation.exit(2)}
         guard getuid() != 0 else {fputs("Run this simulation without sudo from the logged-in desktop session.\n",stderr);Foundation.exit(2)}
         let app=URL(fileURLWithPath:"/Library/Management/PUSH/PUSH Major Upgrade Demo.app")
-        guard let bundle=Bundle(url:app),bundle.bundleIdentifier=="com.push.major-demo",FileManager.default.isExecutableFile(atPath:app.appendingPathComponent("Contents/MacOS/push-major-demo").path) else {fputs("Install the matching PUSH 1.11.0 client first; the isolated demo app is missing.\n",stderr);Foundation.exit(2)}
+        guard let bundle=Bundle(url:app),bundle.bundleIdentifier=="com.push.major-demo",FileManager.default.isExecutableFile(atPath:app.appendingPathComponent("Contents/MacOS/push-major-demo").path) else {fputs("Install the matching PUSH 1.13.0 client first; the isolated demo app is missing.\n",stderr);Foundation.exit(2)}
         // LaunchServices only. Never use root, install workflow, live config or
         // shared production popup/result files. Existing demo sessions reopen.
         let process=Process();process.executableURL=URL(fileURLWithPath:"/usr/bin/open");process.arguments=[app.path,"--args"]+options.launchArguments

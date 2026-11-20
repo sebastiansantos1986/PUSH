@@ -65,7 +65,7 @@ struct StatusCommand {
             cliInfo("Deadline:",        c.effectiveDeadline.isEmpty ? "(none)" : c.effectiveDeadline)
             cliInfo("Past deadline:",   c.isPastDeadline ? "\u{001B}[31mYES\u{001B}[0m" : "No")
             cliInfo("Toast interval:",  "\(formatInterval(Int(c.toastIntervalSeconds))) (every \(c.update.toastIntervalSeconds)s)")
-            cliInfo("Nudge interval:",  "\(formatInterval(Int(c.nudgeIntervalSeconds))) (every \(c.update.nudgeIntervalSeconds)s)")
+            cliInfo("Nudge interval:",  "\(formatInterval(Int(c.nudgeIntervalSeconds))) (every \(Int(c.nudgeIntervalSeconds))s)")
             cliInfo("Hard block mode:", c.ui.hardBlockFullscreen ? "Fullscreen lockout" : "Standard popup")
             cliInfo("Auto install after deadline:", c.update.autoInstallAfterDeadline ? "✅ Enabled — forces install when deadline passes" : "Disabled — hard block only")
             cliInfo("Compliance wallpaper:", c.compliance.wallpaperEnabled ? "Enabled — rechecked each macOS run":"Disabled")
@@ -127,8 +127,8 @@ struct StatusCommand {
         cliDivider()
         if let cfg = config {
             let account = cfg.auth.localAccount
-            cliInfo("Account:", account.isEmpty ? "(not set — IT authorization needs configuration)" : account)
-            cliInfo("User password prompts:", "Disabled")
+            cliInfo("Account:", cfg.auth.promptUserForInstall ? "(logged-in user; installation only)" : (account.isEmpty ? "(not set — IT authorization needs configuration)" : account))
+            cliInfo("User password prompts:", cfg.auth.promptUserForInstall ? "Enabled when needed; reuses login Keychain":"Disabled")
             cliInfo("Keychain:", keychainPasswordExists() ? "✅ Password stored" : "Unavailable without interaction — IT setup needed")
             if !cfg.auth.localPassword.isEmpty {
                 cliWarning("Plain text password in config.yaml — migrate: sudo push-cli auth set-password")
@@ -136,7 +136,7 @@ struct StatusCommand {
 
             // Apple Silicon auth status
             if isAppleSilicon() {
-                cliInfo("Auth policy:", cfg.jamf.laps.enabled ? "Managed Jamf LAPS configured; availability checked at install time" : "Managed credentials or MDM required; no user prompt fallback")
+                cliInfo("Auth policy:", cfg.auth.promptUserForInstall ? "Saved user login Keychain; prompts only when needed" : (cfg.jamf.laps.enabled ? "Managed Jamf LAPS configured; availability checked at install time" : "Managed credentials or MDM required; no user prompt fallback"))
                 let btEscrowed = isBootstrapTokenEscrowed()
                 cliInfo("Bootstrap Token:", btEscrowed ? "✅ Escrowed to MDM" : "Not detected — IT must provision unattended authorization")
                 let stEnabled = consoleUserHasSecureToken()

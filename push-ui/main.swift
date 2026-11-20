@@ -18,13 +18,13 @@ import AppKit
 
 let args = CommandLine.arguments
 if Bundle.main.bundleIdentifier=="com.push.notice" {
-    guard args.count==3,args[1]=="--notice-payload" else {Foundation.exit(99)}
+    guard args.count==3,args[1]=="--notice-payload" else {popupUIExit(99)}
     MainActor.assumeIsolated {StandaloneNoticePresenter.run(args[2])}
 }
 // A dedicated app identity always enters simulation before any live handler.
 if Bundle.main.bundleIdentifier=="com.push.major-demo" {MainActor.assumeIsolated {MajorUpgradeDemoPresenter.run(Array(args.dropFirst()))}}
 handleWallpaperRequest(args)
-if Bundle.main.bundleIdentifier=="com.push.status" {PushStatusApp.main();Foundation.exit(0)}
+if Bundle.main.bundleIdentifier=="com.push.status" {PushStatusApp.main();popupUIExit(0)}
 handleCredentialRequest(args)
 
 func argVal(_ flag: String) -> String? {
@@ -68,14 +68,14 @@ EXIT CODES
   4   Power preflight timed out
   99  Error
 """)
-    Foundation.exit(0)
+    popupUIExit(0)
 }
 
 // Parse arguments
 let stateStr      = argVal("--state")    ?? "softNudge"
 if stateStr == "passwordPrompt" && !allowsUserPasswordPrompts {
     print("User password prompts are disabled. IT must provide managed authorization.")
-    Foundation.exit(2)
+    popupUIExit(2)
 }
 let configPath    = argVal("--config")   ?? "/Library/Management/PUSH/config.yaml"
 let deferralStr   = argVal("--deferrals") ?? "0"
@@ -95,6 +95,14 @@ if args.contains("--deadline-notice") || args.contains("--preparation-notice") {
 }
 if state == .entraRegistration { config.ui.popupWidth = min(900,max(420,config.ui.popupWidth)) }
 
+if let ready=argVal("--ready-file"),argVal("--result-file") != nil {
+    let controller=URL(fileURLWithPath:ready).deletingLastPathComponent().path
+    guard FileManager.default.fileExists(atPath:controller) else {fputs("[PUSH UI] Controller directory is missing; refusing an orphan popup.\n",stderr);popupUIExit(99)}
+    Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
+        if !FileManager.default.fileExists(atPath:controller){popupUIExit(2)}
+    }
+}
+
 let context = UIContext(config: config, state: state,
                         deferralCount: deferralCount, configPath: configPath)
 
@@ -106,19 +114,20 @@ if let a = argVal("--disk-available")    { context.diskAvailableGB  = Double(a) 
 if let r = argVal("--disk-required")     { context.diskRequiredGB   = Double(r) ?? 25.0 }
 if let e = argVal("--error")             { context.errorMessage     = e }
 context.isManualTest = args.contains("--manual-test")
+context.isSelfServiceOffer = args.contains("--self-service-offer")
 if state == .updateRecovery {
     if let payload=argVal("--recovery-payload"),let notice=RecoveryNotice.decode(payload){context.recoveryNotice=notice}
     else if context.isManualTest {context.recoveryNotice=RecoveryNotice.preview()}
-    else {Foundation.exit(PushExitCode.error.rawValue)}
+    else {popupUIExit(PushExitCode.error.rawValue)}
 }
 if state == .entraRegistration {
     if let payload = argVal("--entra-payload"), let notice = EntraNotice.decode(payload) { context.entraNotice = notice }
     else if context.isManualTest { context.entraNotice = EntraNotice.preview(stage:Int(argVal("--entra-stage") ?? "1") ?? 1) }
-    else { Foundation.exit(PushExitCode.error.rawValue) }
+    else { popupUIExit(PushExitCode.error.rawValue) }
 }
 if state == .appUpdates {
     if let payload = argVal("--apps-payload"), let notices = AppUpdateNotice.decodePayload(payload) { context.appUpdates = notices }
-    else if !context.isManualTest { Foundation.exit(PushExitCode.error.rawValue) }
+    else if !context.isManualTest { popupUIExit(PushExitCode.error.rawValue) }
 }
 
 if args.contains("--quick-restart")      { context.quickRestart     = true }
@@ -131,29 +140,20 @@ if let t = argVal("--timer-seconds")        { context.uptimeTimerSeconds = Int(t
 
 // MARK: - App
 
-struct PushUIApp: App {
-    @NSApplicationDelegateAdaptor(PushAppDelegate.self) var delegate
-
-    var body: some Scene {
-        WindowGroup {
-            RootView()
-                .environmentObject(context)
-                .background(WindowConfigurator(context: context))
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-    }
-}
-
 if state == .entraRegistration {
     let application = NSApplication.shared
     application.setActivationPolicy(.accessory)
     let presenter = EntraWindowPresenter()
     application.delegate = presenter
     withExtendedLifetime(presenter) { application.run() }
-    Foundation.exit(PushExitCode.dismiss.rawValue)
+    popupUIExit(PushExitCode.dismiss.rawValue)
 } else {
-    PushUIApp.main()
+    let application=NSApplication.shared
+    application.setActivationPolicy(.accessory)
+    let presenter=PopupWindowPresenter()
+    application.delegate=presenter
+    withExtendedLifetime(presenter){application.run()}
+    popupUIExit(PushExitCode.dismiss.rawValue)
 }
 
 // MARK: - Root view
@@ -204,7 +204,7 @@ class PushAppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[PUSH-UI] Termination blocked — forced install in progress")
             return .terminateCancel
         }
-        Foundation.exit(PushExitCode.dismiss.rawValue)
+        popupUIExit(PushExitCode.dismiss.rawValue)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -212,7 +212,6 @@ class PushAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private let appDelegate = PushAppDelegate()
 
 // MARK: - Fullscreen frost overlay
 // Covers every display at screenSaverWindow level with a blurred NSVisualEffectView.
@@ -282,21 +281,32 @@ struct VisualEffectBackground: NSViewRepresentable {
 
 // MARK: - Window configurator
 
+private final class PopupWindowAttachmentView:NSView {
+    var attached:((NSWindow)->Void)?
+    override func viewDidMoveToWindow(){super.viewDidMoveToWindow();if let window {attached?(window)}}
+}
+
 private struct WindowConfigurator: NSViewRepresentable {
     let context: UIContext
 
+    final class Coordinator {weak var configuredWindow:NSWindow?}
+    func makeCoordinator()->Coordinator {Coordinator()}
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.alphaValue = 0
-            configure(window)
+        let view = PopupWindowAttachmentView()
+        let coordinator=context.coordinator
+        view.attached={window in
+            guard coordinator.configuredWindow !== window else{return}
+            coordinator.configuredWindow=window
+            DispatchQueue.main.async {configure(window)}
         }
         return view
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if let view=nsView as? PopupWindowAttachmentView,let window=view.window {view.attached?(window)}
+    }
 
     private func configure(_ window: NSWindow) {
+        if argVal("--ready-file") != nil {fputs("[PUSH UI] Window attached; presenting popup.\n",stderr)}
         let cfg   = self.context.config
         let state = self.context.state
 
@@ -323,7 +333,8 @@ private struct WindowConfigurator: NSViewRepresentable {
                 // Let SwiftUI size the height by fitting to content, then reposition.
                 // After initial layout, window.frame.height reflects actual content height.
                 // We position bottom-anchored toasts from minY, top-anchored from maxY.
-                window.setContentSize(CGSize(width: w, height: 1))
+                // The native presenter has fitted the existing popup content;
+                // keep its measured height when positioning this toast.
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     let h = window.frame.height
@@ -369,10 +380,13 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.animator().alphaValue = 1
         }
 
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline:.now()+0.25) {
             if let path = argVal("--ready-file"), window.isVisible, window.alphaValue > 0 {
-                try? "ready\n".write(toFile:path,atomically:true,encoding:.utf8)
+                do{try "ready\n".write(toFile:path,atomically:true,encoding:.utf8);fputs("[PUSH UI] Visibility acknowledgement written.\n",stderr)}catch{fputs("[PUSH UI] Could not write visibility acknowledgement.\n",stderr)}
             }
         }
 
@@ -409,7 +423,7 @@ private struct WindowConfigurator: NSViewRepresentable {
 
             // Escape only exits when NOT in a forced/active install state
             if event.keyCode == 53 && (!isForcedInstall || context.isManualTest) {
-                Foundation.exit(PushExitCode.dismiss.rawValue)
+                popupUIExit(PushExitCode.dismiss.rawValue)
             }
             return event
         }
@@ -453,7 +467,7 @@ private final class EntraWindowPresenter: NSObject, NSApplicationDelegate, NSWin
         NSApp.activate(ignoringOtherApps:true)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { event in
             if event.keyCode == 53 || (event.modifierFlags.contains(.command) && [12,13].contains(event.keyCode)) {
-                Foundation.exit(PushExitCode.dismiss.rawValue)
+                popupUIExit(PushExitCode.dismiss.rawValue)
             }
             return event
         }
@@ -463,12 +477,35 @@ private final class EntraWindowPresenter: NSObject, NSApplicationDelegate, NSWin
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
             if let path = argVal("--ready-file"), window.isVisible {
-                try? "ready\n".write(toFile:path,atomically:true,encoding:.utf8)
+                do{try "ready\n".write(toFile:path,atomically:true,encoding:.utf8);fputs("[PUSH UI] Visibility acknowledgement written.\n",stderr)}catch{fputs("[PUSH UI] Could not write visibility acknowledgement.\n",stderr)}
             }
         }
     }
-    func windowWillClose(_ notification: Notification) { Foundation.exit(PushExitCode.dismiss.rawValue) }
+    func windowWillClose(_ notification: Notification) { popupUIExit(PushExitCode.dismiss.rawValue) }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Foundation.exit(PushExitCode.dismiss.rawValue)
+        popupUIExit(PushExitCode.dismiss.rawValue)
     }
+}
+
+// Explicit window creation avoids relying on SwiftUI WindowGroup activation
+// when LaunchServices supplies file-valued command-line options.
+private final class PopupWindowPresenter:NSObject,NSApplicationDelegate,NSWindowDelegate {
+    private var panel:NSWindow?
+    private let terminationGuard=PushAppDelegate()
+    func applicationDidFinishLaunching(_ notification:Notification){
+        FileHandle.standardError.write(Data("[PUSH UI] Creating native popup window.\n".utf8))
+        let width=CGFloat([UIState.toast,.appUpdates].contains(context.state) ? context.config.toast.width:context.config.ui.popupWidth)
+        let hosting=NSHostingView(rootView:RootView().environmentObject(context).background(WindowConfigurator(context:context)))
+        let window=EntraPanel(contentRect:NSRect(x:0,y:0,width:width,height:640),styleMask:[.borderless,.fullSizeContentView],backing:.buffered,defer:false)
+        panel=window;window.delegate=self;window.isReleasedWhenClosed=false;window.contentView=hosting
+        window.title=context.state.windowTitle;window.isOpaque=false;window.backgroundColor = .clear;window.alphaValue=1;window.hasShadow=true
+        window.level = .floating;window.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
+        hosting.layoutSubtreeIfNeeded()
+        let fit=hosting.fittingSize
+        if fit.height.isFinite && fit.height>1 {window.setContentSize(NSSize(width:width,height:fit.height))}
+        window.center();window.makeKeyAndOrderFront(nil);window.orderFrontRegardless();NSApp.activate(ignoringOtherApps:true)
+    }
+    func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {terminationGuard.applicationShouldTerminate(sender)}
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool {false}
+    func windowWillClose(_ notification:Notification){popupUIExit(PushExitCode.dismiss.rawValue)}
 }

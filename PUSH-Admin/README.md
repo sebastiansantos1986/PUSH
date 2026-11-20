@@ -1,28 +1,25 @@
-# Optional Major Upgrade Debug Preview
+# PUSH Admin 1.16.10
 
 Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
 
-Current local test build: engine 1.10.0 / Admin 1.2.0 / JamfCheckIn 1.1.0 unchanged.
+IT-only companion for PUSH Client 1.16.7. Create and save workflows, customize
+messages/icons/wallpapers, simulate user popups, review readiness and build a
+configured employee client. Advanced configuration pages remain available.
 
-PUSH Admin → Major Upgrade (Debug) previews one optional-offer window through simulated download, preparation and restart-ready stages. The client also includes an isolated, never-autostarted demo app. Run `push-cli major-offer --debug` as the logged-in user without sudo after installing the matching client. Every button is simulated; no live installer or restart route is enabled. See PUSH-Major-Upgrade-Debug-Guide.txt for test steps and boundaries. Existing required-update workflows are retained separately.
+Jamf Self Service and Publish to Jamf support optional macOS offers, required
+campaigns, or both. The matching client and verified Mist CLI 2.3 are bundled.
+The publisher reviews exact scope/packages, publishes policies disabled, verifies
+server read-back and enables the approved pilot only as a separate action.
+Success summaries show human-readable policy/group names and Jamf IDs.
 
-## Previous release documentation
+Self Service repairs missing, older or damaged prerequisites on demand. Existing
+project-owned repair events persist across package updates. Current packages do
+not deploy JamfCheckIn or Admin onto employee Macs. User update authorization is
+separate from the admin's API secret; credentials do not enter exported packages.
 
-# PUSH Admin 1.1.0
+The live optional upgrade path exists; Major Upgrade (Debug), Workflow Simulation
+and popup previews remain isolated simulations. Real upgrade/restart validation
+of the latest installer-resource fix is still pending on the pilot Mac.
 
-Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
-
-The complete client builder creates one configured installer with PUSH 1.9.1, JamfCheckIn 1.1.0, reviewed YAML and staged images. Employee Macs do not receive PUSH Admin. Choose paused installation or explicitly reviewed live monitoring (first checks deferred five minutes). Profiles remain separate for MDM delivery. Setup suggestions appear in Guided Setup and Deployment and change only the draft when applied. See PUSH-Admin-1.1.0-Guide.txt for prerequisites, signing, profile scope and pilot testing.
-
-Building runs packaging tools only; no installer, application, profile or service is executed/activated. Current local builds are ad-hoc signed, and generated installers are unsigned. Production signing/notarization is a separate deployment requirement.
-
-# PUSH Client / Admin separation
-
-Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
-
-Current delivery: PUSH Client 1.9.1 (engine + JamfCheckIn 1.1.0) and PUSH Admin 1.0.0 (IT only). Client Macs do not receive the admin console or a second menu app. PUSH Admin → Deployment exports a client/policy/assets/profile bundle. No component is launched or activated by the local-test installer. Production Developer ID signing and notarization remain required before fleet rollout.
-
-The original Desktop projects are unchanged. Existing functionality is retained; PUSH requests use the guarded user channel. Jamf check-in/inventory administration is separate. See the delivered Client-Admin guide and exported READ-ME-FIRST for activation and profile scope.
-
-## Previous project documentation
-
+See [Self Service guide](../docs/SELF-SERVICE.md), [build instructions](../docs/BUILDING.md)
+and [release notes](../docs/RELEASE-NOTES-1.16.7-ADMIN-1.16.10.md).

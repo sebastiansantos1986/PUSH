@@ -34,6 +34,11 @@ struct AuthCommand {
 
     func run() {
         switch subcommand {
+        case "check-launch":
+            guard getuid()==0 else {cliError("auth check-launch requires root; it does not access credentials.");exit(1)}
+            let result=checkInstallAuthorizationLaunch()
+            guard result==0 else {cliError("Authorization launcher check failed (helper status \(result)). No credentials were accessed or installation started.");exit(1)}
+            cliSuccess("Authorization launcher check passed. No credentials were accessed, popup opened, or installation started.")
         case "set-password":         AuthSetPasswordCommand(args: rest).run()
         case "show":                 AuthShowCommand(args: rest).run()
         case "clear":                AuthClearCommand(args: rest).run()

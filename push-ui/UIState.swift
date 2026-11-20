@@ -80,6 +80,8 @@ class UIContext: ObservableObject {
     var recoveryNotice=RecoveryNotice.preview()
     let isPreview = false
     var isManualTest = false
+    var restartPrepared = CommandLine.arguments.contains("--restart-prepared")
+    var isSelfServiceOffer = false
     let config:        UIConfig
     let state:         UIState
     let deferralCount: Int
@@ -118,6 +120,22 @@ class UIContext: ObservableObject {
     func noteAction(_ title: String) {}
 
     func exit(_ code: PushExitCode, automatic: Bool = false) {
-        Foundation.exit(code.rawValue)
+        popupUIExit(code.rawValue)
     }
+}
+
+// Only ordinary popup mode uses this receipt. Credential helpers retain their
+// private pipe protocol and never use LaunchServices or result files.
+func popupUIExit(_ code:Int32)->Never {
+    let arguments=CommandLine.arguments
+    func value(_ flag:String)->String? {guard let i=arguments.firstIndex(of:flag),i+1<arguments.count else{return nil};return arguments[i+1]}
+    if let ready=value("--ready-file"),let result=value("--result-file") {
+        let directory=URL(fileURLWithPath:ready).deletingLastPathComponent()
+        if URL(fileURLWithPath:ready).lastPathComponent=="ready",URL(fileURLWithPath:result)==directory.appendingPathComponent("result"),directory.lastPathComponent.hasPrefix("push-ui-session-"),
+           let info=try? FileManager.default.attributesOfItem(atPath:directory.path),(info[.ownerAccountID] as? NSNumber)?.uint32Value==getuid(),(info[.posixPermissions] as? NSNumber)?.intValue==0o700,
+           let data=try? JSONEncoder().encode(PopupResultReceipt(version:1,session:directory.lastPathComponent,code:code)) {
+            try? data.write(to:URL(fileURLWithPath:result),options:.atomic)
+        }
+    }
+    Foundation.exit(code)
 }

@@ -20,13 +20,13 @@ enum StandalonePopupLauncher {
             process.standardInput=FileHandle.nullDevice
             print("Opening informational popup; waiting for acknowledgement, close or timeout. No update action is attached to its buttons.")
             try process.run();process.waitUntilExit();return process.terminationStatus
-        }catch{print("Popup could not be prepared. No system action occurred.");return 99}
+        }catch{print("Popup could not be prepared: \(error.localizedDescription) No system action occurred.");return 99}
     }
 }
 struct StandaloneNoticeCommand {
     let args:[String]
     func run() {
-        if args==["--help"] {print("push-cli notice --title <text> --message <text> [--kind alert|toast] [--style info|warning|error|success] [--width 480] [--height 480] [--timeout 60] [--debug]. Buttons only return acknowledgement/close/timeout; never execute commands.");return}
+        if args==["--help"] {print("push-cli notice --title <text> --message <text> [--kind alert|toast] [--style info|warning|error|success] [--width 480] [--height 200–1000] [--timeout 60] [--debug]. Buttons only return acknowledgement/close/timeout; never execute commands.");return}
         let allowed=Set(["--title","--message","--kind","--style","--width","--height","--timeout","--primary","--secondary","--banner","--greeting"])
         var values:[String:String]=[:],debug=false,index=0
         while index<args.count {

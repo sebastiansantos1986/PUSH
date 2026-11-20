@@ -17,12 +17,16 @@ import SwiftUI
     }
     func applicationDidFinishLaunching(_ notification:Notification) {
         let screen=NSScreen.main?.visibleFrame ?? NSRect(x:0,y:0,width:1200,height:800)
-        let width=min(notice.presentation.width,screen.width-40),height=min(notice.presentation.height,screen.height-80)
+        let proposed=NoticeWindowLayout.size(width:notice.presentation.width,heightLimit:notice.presentation.height,measuredHeight:200,screenWidth:screen.width,screenHeight:screen.height)
+        let measurement=NSHostingView(rootView:StandaloneNoticeView(notice:notice,scrollContent:false,onResult:{_ in}).frame(width:proposed.width).fixedSize(horizontal:false,vertical:true))
+        measurement.layoutSubtreeIfNeeded()
+        let fitted=NoticeWindowLayout.size(width:proposed.width,heightLimit:notice.presentation.height,measuredHeight:measurement.fittingSize.height,screenWidth:screen.width,screenHeight:screen.height)
+        let width=fitted.width,height=fitted.height
         let window=NSWindow(contentRect:NSRect(x:0,y:0,width:width,height:height),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
         window.title=notice.debug ? "PUSH · Notice preview":"PUSH";window.delegate=self;window.isReleasedWhenClosed=false
-        window.contentMinSize=NSSize(width:320,height:220);window.contentMaxSize=screen.size
-        window.contentView=NSHostingView(rootView:ScrollView{StandaloneNoticeView(notice:notice,onResult:{[weak self] code in self?.finish(code)})})
-        if notice.kind=="toast" {window.setFrameOrigin(NSPoint(x:screen.maxX-width-20,y:screen.maxY-height-20));window.level = .floating}else{window.center()}
+        window.contentMinSize=NSSize(width:min(360,width),height:min(200,height));window.contentMaxSize=screen.size
+        window.contentView=NSHostingView(rootView:StandaloneNoticeView(notice:notice,onResult:{[weak self] code in self?.finish(code)}))
+        if notice.kind=="toast" {window.setFrameOrigin(NSPoint(x:screen.maxX-width-20,y:screen.maxY-window.frame.height-12));window.level = .floating}else{window.center()}
         self.window=window;window.makeKeyAndOrderFront(nil);NSApplication.shared.activate(ignoringOtherApps:true)
     }
     func windowWillClose(_ notification:Notification){finish(2)}

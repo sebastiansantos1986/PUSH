@@ -81,16 +81,27 @@ struct BackgroundPreparation {
         if config.preflight.skipOnVPN && checks.isOnVPN() {save("blocked","Background download deferred by the configured VPN policy.");return}
         guard checks.checkNetworkReachability() else {save("blocked","Background download deferred: update servers are unreachable.");return}
         let directories=[managedBase+"/downloads","/Applications"]
-        if InstallerValidation.find(in:directories,target:target) != nil {save("downloaded","Installer metadata matches the target. Installation will revalidate it after login.",success:true);return}
-        let listing=runDirect("/usr/sbin/softwareupdate",["--list"])
-        let label=config.isMajor ? nil:nativeUpdateLabel(version:target,output:listing.0)
-        guard let plan=label.flatMap({PreparationPlan.native(label:$0)}) ?? PreparationPlan.fullInstaller(target:target) else {save("failed","No safe download-only plan could be constructed.");return}
+        let running=currentMacOSVersion()
+        let majorUpgrade=(numericOSVersion(target)?.first ?? 0)>(numericOSVersion(running)?.first ?? 0)
+        if majorUpgrade,InstallerValidation.find(in:directories,target:target) != nil {save("downloaded","Installer metadata matches the major-upgrade target. Installation will revalidate it after login.",success:true);return}
+        let listing=majorUpgrade ? ("",Int32(0)):nativeOSUpdateCatalog()
+        let route=MacOSUpdateRouting.route(running:running,target:target,listing:listing.0,catalogSucceeded:listing.1==0,maximumMajor:config.auto.maximumMajorVersion,skipBetas:config.auto.skipBetas,restartOnly:false)
+        let plan:PreparationPlan
+        let nativeOffer:NativeOSUpdate?
+        switch route {
+        case .native(let update):
+            guard let value=PreparationPlan.native(label:update.label) else {save("failed","The offered native update label was invalid.");return};plan=value;nativeOffer=update
+        case .fullInstaller:
+            guard let value=PreparationPlan.fullInstaller(target:target) else {save("failed","The full-installer target was invalid.");return};plan=value;nativeOffer=nil
+        case .compliant:save("downloaded","This Mac already meets the required target; no download was needed.",success:true);return
+        case .unavailable(let reason):save("blocked",reason);return
+        }
         record.phase="downloading";record.reason="Downloading macOS without a logged-in user; no installation is requested";record.retryAfter=nil
         if let data=try? JSONEncoder().encode(record) {try? data.write(to:stateURL,options:.atomic)}
         RuntimeHealthScope.phase("updating","Background download-only preparation is running; user awareness remains queued")
         let result=execute(plan,log:folder.appendingPathComponent("download.log"))
         guard result==0 else {save("failed","Background download failed or timed out. No installation was requested; retry is delayed one hour.");return}
-        if label != nil {save("downloaded","Native download command completed. Installation and cache availability will be rechecked after login.",success:true)}
+        if let offer=nativeOffer {save("downloaded","Native macOS \(offer.version) download command completed. Installation and cache availability will be rechecked after login.",success:true)}
         else if InstallerValidation.find(in:directories,target:target) != nil {save("downloaded","Full-installer download completed and target metadata matches. Installation remains pending login and authorization.",success:true)}
         else {save("failed","Download command finished but no installer matching the target was found. No installation was requested.")}
     }

@@ -149,12 +149,12 @@ struct PopupCard<Content: View>: View {
             .frame(width: width)
             .background(PopupSurface())
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 20)
                     .stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
             )
             .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 8)
             .shadow(color: Color.black.opacity(0.08), radius: 4,  x: 0, y: 2)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(alignment: .topLeading) {
                 if showTrafficLights {
                     TrafficLights()
@@ -172,6 +172,7 @@ struct PopupHeader: View {
     let subtitle: String
     var urgent:   Bool = false
     var title: String? = nil
+    var compact:Bool = false
 
     var body: some View {
         HStack(spacing: 13) {
@@ -187,7 +188,7 @@ struct PopupHeader: View {
             Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.top, 34)
+        .padding(.top, compact ? 22:34)
         .padding(.bottom, 14)
         .background(urgent ? Color.red.opacity(0.05) : Color.clear)
     }
@@ -237,9 +238,9 @@ struct AppIconView: View {
 
     private func bundleIcon() -> NSImage? {
         // Try loading from the app bundle — works when icns is in Resources
-        if let img = NSImage(named: "InstallAssistant") { return img }
+        if let img = NSImage(named: "PUSH") { return img }
         // Also try direct bundle path
-        if let path = Bundle.main.path(forResource: "InstallAssistant", ofType: "icns"),
+        if let path = Bundle.main.path(forResource: "PUSH", ofType: "icns"),
            let img  = NSImage(contentsOfFile: path) { return img }
         return nil
     }
@@ -909,5 +910,38 @@ struct DatePickerSheet: View {
 
     private func isSameMinute(_ a: Date, _ b: Date) -> Bool {
         return abs(a.timeIntervalSince(b)) < 60
+    }
+}
+
+// A concise phase overview. Completed stages describe preparation, never claim
+// that the operating system installation has finished after reboot.
+struct UpdateStageTrack:View {
+    @EnvironmentObject var ctx:UIContext
+    let stage:Int
+    private let labels=["Download","Prepare","Restart"]
+    var body:some View {
+        HStack(spacing:10){
+            ForEach(0..<3){index in
+                HStack(spacing:6){
+                    Image(systemName:index<stage ? "checkmark.circle.fill":index==stage ? "circle.inset.filled":"circle")
+                        .foregroundStyle(index<=stage ? ctx.config.accentColor:Color.secondary.opacity(0.5))
+                    Text(labels[index]).foregroundStyle(index==stage ? Color.primary:Color.secondary)
+                }.font(.system(size:11,weight:index==stage ? .semibold:.medium))
+                if index<2 {Rectangle().fill(Color.primary.opacity(0.10)).frame(height:1)}
+            }
+        }.accessibilityElement(children:.combine)
+    }
+}
+struct UpdateGuidance:View {
+    let text:String
+    var symbol="powerplug.fill"
+    var body:some View {
+        HStack(alignment:.top,spacing:10){
+            Image(systemName:symbol).font(.system(size:13,weight:.medium)).padding(.top,2)
+            Text(text).font(.system(size:12)).fixedSize(horizontal:false,vertical:true).lineSpacing(3)
+            Spacer(minLength:0)
+        }.foregroundStyle(.secondary).padding(14)
+            .frame(maxWidth:.infinity,alignment:.leading)
+            .background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:12))
     }
 }

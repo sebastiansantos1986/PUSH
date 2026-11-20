@@ -6,12 +6,16 @@ import AppKit
 import Combine
 
 enum AdminPage: String, CaseIterable, Identifiable {
+    case publisher = "Publish to Jamf"
+    case selfService = "Jamf Self Service"
+    case workflow = "Create Workflow"
+    case simulation = "Workflow Simulation"
     case singlePopup = "Single Popups"
     case majorUpgrade = "Major Upgrade (Debug)"
     case recovery = "User Status & Recovery", history = "Delivery History", wallpaper = "Wallpaper", setup = "Guided Setup", readiness = "Readiness", overview = "Overview", catalog = "macOS Releases", configuration = "Configuration", apps = "App Updates", entra = "Entra Registration", studio = "Popup Studio", deployment = "Deployment"
     var id: String { rawValue }
     var icon: String {
-        switch self { case .singlePopup:return "bubble.left.and.text.bubble.right"; case .majorUpgrade:return "arrow.up.square"; case .recovery:return "arrow.clockwise.circle"; case .history:return "clock.arrow.circlepath"; case .wallpaper:return "photo"; case .setup:return "wand.and.stars"; case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
+        switch self { case .publisher:return "arrow.up.doc"; case .selfService:return "square.and.arrow.down"; case .simulation:return "play.rectangle"; case .workflow:return "wand.and.stars"; case .singlePopup:return "bubble.left.and.text.bubble.right"; case .majorUpgrade:return "arrow.up.square"; case .recovery:return "arrow.clockwise.circle"; case .history:return "clock.arrow.circlepath"; case .wallpaper:return "photo"; case .setup:return "wand.and.stars"; case .readiness:return "checklist"; case .overview:return "square.grid.2x2"; case .catalog:return "globe.americas"; case .configuration:return "slider.horizontal.3"; case .apps:return "square.stack.3d.up"; case .entra:return "person.crop.circle.badge.checkmark"; case .studio:return "rectangle.on.rectangle"; case .deployment:return "shippingbox" }
     }
 }
 @main
@@ -21,7 +25,7 @@ struct PUSHAdminApp: App {
         WindowGroup("PUSH Admin") { AdminRoot().environmentObject(store).frame(minWidth:1100,minHeight:780) }
             .defaultSize(width:1250,height:900)
         Settings { VStack(alignment:.leading,spacing:12) {
-            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.3.0 · Developer: Sebastian Santos")
+            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.16.10 · Developer: Sebastian Santos")
             Text("Mist checks run at launch and when you refresh. They list stable installers compatible with this Mac; they never download an installer.")
             Link("mist-cli project",destination:URL(string:"https://github.com/ninxsoft/mist-cli")!)
         }.padding(28).frame(width:500) }
@@ -29,7 +33,7 @@ struct PUSHAdminApp: App {
 }
 struct AdminRoot: View {
     @EnvironmentObject var store: AdminStore
-    @State private var page: AdminPage = .readiness
+    @State private var page: AdminPage = .workflow
     var body: some View {
         GeometryReader { window in
             HStack(spacing: 0) {
@@ -44,7 +48,7 @@ struct AdminRoot: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "arrow.down.circle.fill").font(.system(size: 34)).foregroundStyle(.blue)
+                Image("PUSHAdmin").resizable().scaledToFit().frame(width:48,height:48)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PUSH").font(.system(size: 24, weight: .bold, design: .rounded))
                     Text("ADMIN CONSOLE").font(.system(size: 9, weight: .semibold)).tracking(2).foregroundStyle(.secondary)
@@ -67,8 +71,8 @@ struct AdminRoot: View {
             }
             Divider()
             VStack(alignment: .leading, spacing: 5) {
-                Label("User password prompts disabled", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
-                Text("Sebastian Santos · v1.3.0").font(.caption2).foregroundStyle(.tertiary)
+                Label("Credentials stay in Keychain", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
+                Text("Sebastian Santos · v1.16.10").font(.caption2).foregroundStyle(.tertiary)
             }.padding(18)
         }.background(Color(NSColor.controlBackgroundColor))
     }
@@ -85,6 +89,10 @@ struct AdminRoot: View {
             Divider()
             Group {
                 switch page {
+                case .publisher: JamfPublisherPage()
+                case .selfService: SelfServicePage()
+                case .simulation: WorkflowSimulationPage()
+                case .workflow: WorkflowBuilderPage(navigate:{page=$0})
                 case .singlePopup: SinglePopupPage()
                 case .majorUpgrade: MajorUpgradePage()
                 case .recovery: RecoverySettingsPage()
@@ -336,16 +344,25 @@ struct StudioPreview: View {
     @StateObject private var ctx: UIContext
     @State private var showButtonChecks = false
     @State private var measuredHeight: CGFloat = 720
+    let simulationAction:((String,Int32?,Bool)->Void)?
+    let previewProgress:Double
     let logoData: Data?
     let chooseLogo: () -> Void
-    init(state: UIState, yaml: String, progress: Double, deferrals: Int, logoData: Data?, chooseLogo: @escaping () -> Void, appNotices: [AppUpdateNotice]? = nil, entraNotice: EntraNotice? = nil, informationalToastMessage: String? = nil, recoveryNotice: RecoveryNotice? = nil) {
+    init(state: UIState, yaml: String, progress: Double, deferrals: Int, logoData: Data?, chooseLogo: @escaping () -> Void, appNotices: [AppUpdateNotice]? = nil, entraNotice: EntraNotice? = nil, informationalToastMessage: String? = nil, recoveryNotice: RecoveryNotice? = nil, sampleCurrentVersion:String? = nil, forcedPreview:Bool = false, selfServicePreview:Bool = false, simulationAction:((String,Int32?,Bool)->Void)? = nil) {
+        self.simulationAction=simulationAction;self.previewProgress=progress
         self.logoData = logoData
         self.chooseLogo = chooseLogo
         var config = UIConfig.fromAdminYAML(yaml)
+        config.previewCurrentVersion=sampleCurrentVersion
+        if forcedPreview {config.update.deadline=ISO8601DateFormatter().string(from:Date().addingTimeInterval(-60))}
+        if simulationAction != nil {config.toast.soundName="";config.toast.autoDismissSeconds=0}
         config.ui.popupWidth = min(900, max(420, config.ui.popupWidth))
         config.toast.width = min(700, max(300, config.toast.width))
         if informationalToastMessage != nil {config.toast.autoDismissSeconds=30;config.toast.showCloseButton=true}
         let context = UIContext(config: config, state: state, deferralCount: deferrals)
+        context.forcedInstall=forcedPreview
+        context.isSelfServiceOffer=selfServicePreview
+        context.restartPrepared=selfServicePreview && state == .rebooting
         context.informationalToastMessage=informationalToastMessage
         context.recoveryNotice=recoveryNotice ?? RecoveryNotice.preview()
         if let entraNotice { context.entraNotice = entraNotice }
@@ -399,7 +416,11 @@ struct StudioPreview: View {
                 LinearGradient(colors:[Color.blue.opacity(0.15),Color.purple.opacity(0.12),Color.orange.opacity(0.09)],startPoint:.topLeading,endPoint:.bottomTrailing)
             }
         }
-        .onAppear { ctx.onPreviewAction = { state, action, code, automatic in if ctx.informationalToastMessage == nil {store.recordButtonCheck(state:state,action:action,code:code,automatic:automatic)} } }
+        .onAppear { ctx.onPreviewAction = { state, action, code, automatic in
+            if let simulationAction {simulationAction(state,code,automatic)}
+            else if ctx.informationalToastMessage == nil {store.recordButtonCheck(state:state,action:action,code:code,automatic:automatic)}
+        } }
+        .onChange(of:previewProgress){_,value in ctx.downloadProgress=value;ctx.downloadSubtitle="SIMULATED · Progress \(Int(value*100))%"}
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.08)))
     }
@@ -450,7 +471,7 @@ struct DeploymentPage:View {
             }
             AdminCard {
                 Label("Unattended authorization",systemImage:"lock.shield").font(.headline)
-                Text("Configure management enrollment and IT-managed authorization before attempting real upgrades. The companion does not collect users’ login passwords, store API secrets, or change Keychain access. A catalog result is not proof that a Mac is enrolled or authorized to upgrade.").font(.callout).foregroundStyle(.secondary)
+                Text("Configure management enrollment and IT-managed authorization before attempting real upgrades. The companion does not collect users’ login passwords. Publish to Jamf can remember the API client secret you enter in your login Keychain. A catalog result is not proof that a Mac is enrolled or authorized to upgrade.").font(.callout).foregroundStyle(.secondary)
             }
         }.padding(30)}
     }

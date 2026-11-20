@@ -483,19 +483,14 @@ check(previewButtonTitle(state:"updateRecovery",code:7)=="Automatic recovery ret
 check(!UserUpdateRequest.allowed(policyAvailable:true,enabled:true,dryRun:true,requestsEnabled:true,pending:false,monitor:true,target:"27.2",running:"27.0"),"menu requests stay disabled under dry-run policy")
 
 let generatedProfiles=try DeploymentProfiles.files(teamID:"")
-check(generatedProfiles.count==2,"export contains notification and background profiles only")
-let notifyProfile=try PropertyListSerialization.propertyList(from:generatedProfiles["JamfCheckIn-Notifications.mobileconfig"]!,format:nil) as! [String:Any]
-let notifyPayload=(notifyProfile["PayloadContent"] as! [[String:Any]])[0]
-let notifySettings=(notifyPayload["NotificationSettings"] as! [[String:Any]])[0]
-check(notifyPayload["PayloadType"] as? String == "com.apple.notificationsettings","notification profile uses the Apple payload type")
-check(notifySettings["BundleIdentifier"] as? String == DeploymentProfiles.jamfID,"notification profile matches the existing JamfCheckIn identity")
-check(notifySettings["ShowInLockScreen"] as? Bool == false,"export avoids exposing notification content on the lock screen")
+check(generatedProfiles.count==1,"export contains PUSH background approval only")
+check(generatedProfiles["JamfCheckIn-Notifications.mobileconfig"] == nil,"JamfCheckIn notification profile is not deployed")
 let teamProfiles=try DeploymentProfiles.files(teamID:"A1B2C3D4E5")
 let managedProfile=try PropertyListSerialization.propertyList(from:teamProfiles["PUSH-Background-Items.mobileconfig"]!,format:nil) as! [String:Any]
 let managedPayload=(managedProfile["PayloadContent"] as! [[String:Any]])[0]
 let managedRules=managedPayload["Rules"] as! [[String:Any]]
 check(managedPayload["PayloadType"] as? String == "com.apple.servicemanagement","background approval uses Apple's Service Management payload")
-check(managedRules.count==4 && managedRules.allSatisfy{$0["TeamIdentifier"] as? String == "A1B2C3D4E5"},"production Team ID constrains every exact background rule")
+check(managedRules.count==2 && managedRules.allSatisfy{$0["TeamIdentifier"] as? String == "A1B2C3D4E5"},"production Team ID constrains every exact background rule")
 check(!managedRules.contains{($0["RuleType"] as? String)?.contains("Prefix")==true || $0["RuleType"] as? String == "TeamIdentifier"},"no broad prefix or team-wide approval is generated")
 check(!managedRules.contains{$0["RuleValue"] as? String == "com.push.status"},"retired standalone menu gets no managed approval")
 var malformedTeam=false
@@ -510,7 +505,7 @@ let fixtureClient=exportFixture.appendingPathComponent("fixture.pkg")
 try Data("OFFLINE FIXTURE — NOT AN INSTALLER".utf8).write(to:fixtureClient)
 let fixtureExport=exportFixture.appendingPathComponent("bundle")
 try DeploymentBundle.write(.init(yaml:ConfigDocument.fresh.yaml,assets:["assets/popup-logo.png":Data("fixture image".utf8)],teamID:""),client:fixtureClient,to:fixtureExport)
-check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PUSH-Client-1.11.0.pkg").path),"bundle includes the supplied client artifact")
+check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PUSH-Client-1.16.7.pkg").path),"bundle includes the supplied client artifact")
 check(FileManager.default.fileExists(atPath:fixtureExport.appendingPathComponent("PolicyPayload/Library/Management/PUSH/assets/popup-logo.png").path),"bundle stages images at their managed destinations")
 let exportManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:fixtureExport.appendingPathComponent("manifest.json"))) as! [String:Any]
 check(exportManifest["adminIncludedOnClients"] as? Bool == false,"manifest explicitly excludes the admin app from clients")
@@ -529,7 +524,7 @@ check(!DeploymentBundle.buildPolicy.contains("install-daemon") && !DeploymentBun
 
 let fixtureRestart=RestartProfileIdentity(teamID:"A1B2C3D4E5",requirement:"identifier \"push-cli\" and anchor apple generic",sha256:String(repeating:"a",count:64))
 let restartProfiles=try DeploymentProfiles.files(teamID:"A1B2C3D4E5",restartIdentity:fixtureRestart)
-check(restartProfiles.count==3,"restart approval is conditional on a supplied signing identity")
+check(restartProfiles.count==2,"restart approval is conditional on a supplied signing identity")
 let restartProfile=try PropertyListSerialization.propertyList(from:restartProfiles["PUSH-Gentle-Restart-PPPC.mobileconfig"]!,format:nil) as! [String:Any]
 let restartPayload=(restartProfile["PayloadContent"] as! [[String:Any]])[0]
 let restartServices=restartPayload["Services"] as! [String:Any]
@@ -579,7 +574,7 @@ let activeInstallScript=ConfiguredClientBuilder.postinstall(activation:.monitor,
 check(activeInstallScript.contains("shasum") && activeInstallScript.range(of:"shasum")!.lowerBound<activeInstallScript.range(of:"launchctl bootstrap")!.lowerBound,"reviewed YAML hash is checked before future service activation")
 check(activeInstallScript.contains("launchctl print \"system/$label\""),"configured activation verifies loaded service rather than assuming CLI success")
 let combinedPreflight=ConfiguredClientBuilder.preinstall(assetPaths:["assets/popup-logo.png"])
-check(combinedPreflight.contains("engine-preinstall") && combinedPreflight.contains("jamf-preinstall") && combinedPreflight.contains("symbolic link"),"configured package retains both backup preflights and protects policy/image paths")
+check(combinedPreflight.contains("engine-preinstall") && combinedPreflight.contains("JamfCheckIn is not part of this package") && combinedPreflight.contains("symbolic link"),"configured package retains engine backup preflight, excludes JamfCheckIn, and protects policy/image paths")
 check(SetupAdvisor.evaluate(liveDraft,catalogDate:advisorNow,catalogCached:true,providerPresent:nil,mistPresent:false,now:advisorNow).contains{$0.id=="catalog"},"cached catalog data is identified even when its timestamp is recent")
 
 if let clientPath=ProcessInfo.processInfo.environment["PUSH_TEST_CLIENT"],let folder=ProcessInfo.processInfo.environment["PUSH_TEST_BUILD_FOLDER"] {
@@ -704,4 +699,368 @@ if let clientPath=ProcessInfo.processInfo.environment["PUSH_READY_CLIENT"],let c
     check(catalog.source=="https://gdmf.apple.com/v2/pmv" && !catalog.releases.isEmpty,"ready package uses the actual normalized Apple catalog")
 }
 
+
+let shortNoticeSize=NoticeWindowLayout.size(width:480,heightLimit:680,measuredHeight:316,screenWidth:1440,screenHeight:900)
+check(shortNoticeSize.height==316 && shortNoticeSize.width==480,"short notices fit content instead of retaining empty configured height")
+let longNoticeSize=NoticeWindowLayout.size(width:480,heightLimit:400,measuredHeight:950,screenWidth:1440,screenHeight:900)
+check(longNoticeSize.height==400,"long notices respect the configured height ceiling")
+let smallScreenNotice=NoticeWindowLayout.size(width:900,heightLimit:1000,measuredHeight:900,screenWidth:800,screenHeight:600)
+check(smallScreenNotice.width==760 && smallScreenNotice.height==520,"notice sizing leaves room for screen margins and window chrome")
+let toastNoticeSize=NoticeWindowLayout.size(width:420,heightLimit:320,measuredHeight:245,screenWidth:1440,screenHeight:900)
+check(toastNoticeSize.height==245,"short toast content shrinks below its height limit")
+let markdownBlocks=NoticeMarkdown.blocks("# Heading\n\nSave **your work**.\n\n- First\n- Second\n1. Then this\n> Note\n```\nliteral *code*\n```")
+check(markdownBlocks == [.heading(1,"Heading"),.paragraph("Save **your work**."),.bullet("First"),.bullet("Second"),.numbered("1.","Then this"),.quote("Note"),.code("literal *code*")],"Markdown preserves headings, separate list items, quotes and literal code")
+check(NoticeMarkdown.blocks("One\nline\n\nTwo") == [.paragraph("One\nline"),.paragraph("Two")],"Markdown preserves line breaks and separate paragraphs")
+check(NoticeMarkdown.blocks("```\nunclosed") == [.code("unclosed")],"an unfinished code fence remains readable")
+let boldInline=NoticeMarkdown.inline("Save **your work** and *close apps*.")
+check(String(boldInline.characters)=="Save your work and close apps.","inline Markdown removes formatting markers from rendered text")
+check(NoticeMarkdown.allowsLink(URL(string:"https://example.com/help")!) && NoticeMarkdown.allowsLink(URL(string:"mailto:help@example.com")!),"web and email links can be opened by an explicit user click")
+check(!NoticeMarkdown.allowsLink(URL(string:"file:///tmp/example")!) && !NoticeMarkdown.allowsLink(URL(string:"jamfselfservice://example")!),"local files and app-command URL schemes are blocked in notice Markdown")
+let unsafeInline=NoticeMarkdown.inline("[Unsafe](file:///tmp/example) and [Safe](https://example.com)")
+check(unsafeInline.runs.compactMap{$0.link}.allSatisfy{NoticeMarkdown.allowsLink($0)} && unsafeInline.runs.compactMap{$0.link}.count==1,"unsafe link targets are removed while safe links retain their attributes")
+var laterResponse=NoticeResponseState()
+check(laterResponse.respond(2) && !laterResponse.respond(0) && laterResponse.result==2,"close/secondary response cannot later become primary acknowledgement")
+var acknowledgedResponse=NoticeResponseState(),ackRemaining=1
+check(acknowledgedResponse.respond(0) && !acknowledgedResponse.tick(remaining:&ackRemaining,timeout:1) && acknowledgedResponse.result==0,"timer cannot overwrite a primary button response")
+var timedResponse=NoticeResponseState(),testRemaining=2
+check(!timedResponse.tick(remaining:&testRemaining,timeout:2) && timedResponse.tick(remaining:&testRemaining,timeout:2) && timedResponse.result==5 && !timedResponse.respond(0),"timeout returns its own result exactly once without claiming consent")
+var noTimeoutResponse=NoticeResponseState(),zeroRemaining=0
+check(!noTimeoutResponse.tick(remaining:&zeroRemaining,timeout:0) && noTimeoutResponse.result==nil,"never-close notices do not generate an automatic response")
+
+
+var compact200=SinglePopupNotice(title:"Compact test",message:"Safe **Markdown** message")
+compact200.presentation.height=200
+check((try? compact200.payload()) != nil,"a 200-point popup passes validation and payload encoding")
+let at200=NoticeWindowLayout.size(width:480,heightLimit:200,measuredHeight:500,screenWidth:1440,screenHeight:900)
+check(at200.height==200,"a 200-point height limit is respected without a hidden 240-point clamp")
+compact200.presentation.height=199
+check((try? compact200.payload()) == nil,"heights below the documented 200-point minimum are rejected")
+
+
+check(!CLIConfig.parse(yaml:ConfigDocument.fresh.yaml).auth.promptUserForInstall,"fresh Admin drafts keep user authorization opt-in")
+var promptDraft=ConfigDocument.fresh
+promptDraft.edits["auth.promptUserForInstall"]="true"
+check(CLIConfig.parse(yaml:promptDraft.yaml).auth.promptUserForInstall,"Admin's authorization toggle round-trips through engine YAML")
+
+
+let workflowNow=ISO8601DateFormatter().date(from:"2026-11-09T15:00:00Z")!
+var workflow=WorkflowRecipe(now:workflowNow,timeZoneID:"America/Chicago")
+check(ISO8601DateFormatter().string(from:workflow.deadline)=="2026-11-16T23:00:00Z","workflow date picker defaults to next Monday 5 PM in the chosen zone")
+check(workflow.issues(now:workflowNow).isEmpty,"starter recipe needs no raw configuration knowledge")
+let planned=workflow.proposed(from:ConfigDocument.fresh)
+let plannedEngine=CLIConfig.parse(yaml:planned.yaml)
+check(planned.problems.isEmpty && plannedEngine.debug.dryRun && plannedEngine.schedule.skipDuringMeetings==plannedEngine.schedule.skipInstallDuringScreenShare,"starter workflow produces a valid paused draft")
+check(plannedEngine.auth.promptUserForInstall,"starter workflow selects existing user Keychain authorization")
+check(plannedEngine.auto.enforceMinimumMajorVersion==26 && plannedEngine.auto.maximumMajorVersion==26,"chosen macOS generation sets both a minimum and a ceiling")
+check(plannedEngine.update.autoInstallAfterDeadline && plannedEngine.update.deadline=="2026-11-16T23:00:00Z","workflow emits reviewed deadline enforcement automatically")
+check(!plannedEngine.apps.enabled && !plannedEngine.entra.enabled && !plannedEngine.uptime.enabled,"unselected tasks stay disabled in generated workflow")
+var branded=ConfigDocument.fresh;branded.edits["ui.orgName"]="Fixture Organization";branded.edits["auth.localAccount"]="fixture-managed-account"
+let brandedPlan=workflow.proposed(from:branded)
+check(brandedPlan.setupValue("ui.orgName")=="Fixture Organization" && brandedPlan.setupValue("auth.localAccount")=="fixture-managed-account","workflow generation preserves branding and configured managed account")
+let persistedWorkflow=try JSONDecoder().decode(ConfigDocument.self,from:JSONEncoder().encode(planned))
+check(persistedWorkflow.workflowRecipe==workflow,"workflow questions survive saved draft round trips")
+workflow.startAfterInstall=true
+let liveWorkflow=workflow.proposed(from:ConfigDocument.fresh)
+check(!CLIConfig.parse(yaml:liveWorkflow.yaml).debug.dryRun,"explicit live installation choice disables dry-run in the generated draft")
+workflow.tasks=[.apps]
+let appsWorkflow=workflow.proposed(from:ConfigDocument.fresh)
+let appsWorkflowEngine=CLIConfig.parse(yaml:appsWorkflow.yaml)
+check(appsWorkflowEngine.apps.enabled && !appsWorkflowEngine.auto.enabled && !appsWorkflowEngine.update.autoInstallAfterDeadline,"apps-only recipe cannot enable macOS enforcement")
+check(appsWorkflowEngine.apps.approved=="chrome" && appsWorkflow.problems.isEmpty,"approved app selection uses actual provider IDs")
+var appsOnlyAllowed=true;do{try ConfiguredClientBuilder.validate(appsWorkflow,activation:.monitor)}catch{appsOnlyAllowed=false}
+check(appsOnlyAllowed,"apps-only workflows can load their schedule without enabling macOS updates")
+workflow.tasks=[.registration]
+let registrationWorkflow=CLIConfig.parse(yaml:workflow.proposed(from:ConfigDocument.fresh).yaml)
+check(registrationWorkflow.entra.enabled && !registrationWorkflow.auto.enabled && !registrationWorkflow.apps.enabled,"registration-only recipe leaves unrelated modules disabled")
+workflow.tasks=[.restart]
+let restartWorkflow=workflow.proposed(from:ConfigDocument.fresh)
+check(CLIConfig.parse(yaml:restartWorkflow.yaml).uptime.enabled && !CLIConfig.parse(yaml:restartWorkflow.yaml).auto.enabled,"restart-only recipe does not enable OS discovery")
+workflow.tasks=[.macOS,.apps,.registration];workflow.authorization = .managed
+let combined=CLIConfig.parse(yaml:workflow.proposed(from:branded).yaml)
+check(combined.auto.enabled && combined.apps.enabled && combined.entra.enabled && !combined.auth.promptUserForInstall,"combined tasks support managed authorization without user password fallback")
+workflow.target = .fixed;workflow.fixedVersion="26.7.2"
+let fixedWorkflow=CLIConfig.parse(yaml:workflow.proposed(from:planned).yaml)
+check(!fixedWorkflow.auto.trackLatest && !fixedWorkflow.auto.minorOnly && fixedWorkflow.update.targetVersion=="26.7.2" && fixedWorkflow.auto.enforceMinimumMajorVersion==0 && fixedWorkflow.auto.maximumMajorVersion==0,"fixed-version recipes clear an earlier tracking generation limit")
+workflow.target = .current
+let currentWorkflow=CLIConfig.parse(yaml:workflow.proposed(from:planned).yaml)
+check(currentWorkflow.auto.trackLatest && currentWorkflow.auto.minorOnly && currentWorkflow.auto.maximumMajorVersion==0,"current-generation workflows have no invented global generation cap")
+workflow.tasks=[]
+check(!workflow.issues(now:workflowNow).isEmpty,"empty workflow cannot be presented as ready to build")
+workflow.tasks=[.apps];workflow.approvedApps=[]
+check(!workflow.issues(now:workflowNow).isEmpty,"an app workflow needs an explicit approved app")
+workflow.approvedApps=["chrome"];workflow.deadline=workflowNow.addingTimeInterval(-1)
+check(!workflow.issues(now:workflowNow).isEmpty,"past app deadlines are caught before live packaging")
+
+
+if let clientPath=ProcessInfo.processInfo.environment["PUSH_WORKFLOW_CLIENT"],let fixtureFolder=ProcessInfo.processInfo.environment["PUSH_WORKFLOW_FOLDER"],let hardwarePath=ProcessInfo.processInfo.environment["PUSH_WORKFLOW_HARDWARE"],let catalogPath=ProcessInfo.processInfo.environment["PUSH_WORKFLOW_CATALOG"],let scriptPath=ProcessInfo.processInfo.environment["PUSH_WORKFLOW_EA"] {
+    try FileManager.default.createDirectory(atPath:fixtureFolder,withIntermediateDirectories:true)
+    var workflow=WorkflowRecipe();workflow.startAfterInstall=true;workflow.includeTahoeAudit=true
+    var doc=WorkflowWording.applySet(recipe:workflow,to:workflow.proposed(from:ConfigDocument.fresh))
+    let workflowLogo=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
+    doc.edits["ui.logoPath"]=deployedPopupLogoPath;doc.logoImageData=workflowLogo
+    let catalog=try JSONDecoder().decode(AppleHardwareCatalog.self,from:Data(contentsOf:URL(fileURLWithPath:catalogPath)))
+    var input=DeploymentBundleInput(yaml:doc.yaml,assets:["assets/popup-logo.png":workflowLogo],teamID:"",majorSettings:MajorOfferSettings(),hardwareCatalog:catalog,hardwareReporterPackage:try Data(contentsOf:URL(fileURLWithPath:hardwarePath)),hardwareInventoryScript:try Data(contentsOf:URL(fileURLWithPath:scriptPath)))
+    let fixtureReview=WorkflowComparison(baseline:nil,current:WorkflowBaseline.capture(doc,name:"Package fixture")).report
+    input.workflowChangeReport=fixtureReview
+    let destination=URL(fileURLWithPath:fixtureFolder).appendingPathComponent("combined-hardware")
+    try ConfiguredClientBuilder.build(input,client:URL(fileURLWithPath:clientPath),activation:.monitor,to:destination)
+    check(FileManager.default.fileExists(atPath:destination.appendingPathComponent("PUSH-Configured-Client.pkg").path),"Create Workflow builds one live configured client with hardware reporting")
+    check(FileManager.default.fileExists(atPath:destination.appendingPathComponent("Inventory/Jamf-EA-Tahoe-Readiness.sh").path),"workflow export includes the inventory script for the management system")
+    check(!FileManager.default.fileExists(atPath:destination.appendingPathComponent("Inventory/PUSH-Tahoe-Readiness.pkg").path),"combined export does not require a second hardware installer")
+    let exportedLogo=try Data(contentsOf:destination.appendingPathComponent("PolicyPayload/Library/Management/PUSH/assets/popup-logo.png"))
+    check(exportedLogo==workflowLogo,"workflow export contains the selected popup icon")
+    let exportedCopy=try String(contentsOf:destination.appendingPathComponent("PolicyPayload/Library/Management/PUSH/config.yaml"))
+    check(UIConfig.fromAdminYAML(exportedCopy).toast.message?.resolvedNewlines==WorkflowWording.suggested(.toast,recipe:workflow),"workflow export retains the tailored toast message")
+    let packagedReview=try String(contentsOf:destination.appendingPathComponent("WORKFLOW-CHANGES.txt"))
+    check(packagedReview==fixtureReview,"configured export includes the exact frozen workflow review")
+    let reviewManifest=try JSONSerialization.jsonObject(with:Data(contentsOf:destination.appendingPathComponent("manifest.json"))) as! [String:Any]
+    let reviewFiles=reviewManifest["files"] as! [[String:String]]
+    check(reviewFiles.contains{$0["path"]=="WORKFLOW-CHANGES.txt" && $0["sha256"]==DeploymentBundle.digest(Data(fixtureReview.utf8))},"workflow change review is protected by the export manifest hash")
+    let audit=URL(fileURLWithPath:fixtureFolder).appendingPathComponent("audit-only")
+    try HardwareWorkflowExporter.writeAudit(package:input.hardwareReporterPackage!,script:input.hardwareInventoryScript!,catalog:catalog,to:audit)
+    check(FileManager.default.fileExists(atPath:audit.appendingPathComponent("PUSH-Tahoe-Readiness.pkg").path),"audit-only workflow builds a reporting package without a full client")
+    var onlyApps=WorkflowRecipe();onlyApps.tasks=[.apps];onlyApps.startAfterInstall=true
+    let appInput=DeploymentBundleInput(yaml:onlyApps.proposed(from:ConfigDocument.fresh).yaml,assets:[:],teamID:"")
+    let appDestination=URL(fileURLWithPath:fixtureFolder).appendingPathComponent("apps-only")
+    try ConfiguredClientBuilder.build(appInput,client:URL(fileURLWithPath:clientPath),activation:.monitor,to:appDestination)
+    check(FileManager.default.fileExists(atPath:appDestination.appendingPathComponent("PUSH-Configured-Client.pkg").path),"apps-only workflow builds a live scheduled package with OS updates disabled")
+}
+
+
+var importedBuilderDoc=ConfigDocument.load("auto:\n  enabled: false\napps:\n  enabled: true\n  approved: firefox\nauth:\n  promptUserForInstall: false\n",name:"Imported workflow")
+let inferredRecipe=WorkflowRecipe.from(document:importedBuilderDoc)
+check(inferredRecipe.tasks == [.apps] && inferredRecipe.authorization == .managed && inferredRecipe.approvedApps == ["firefox"],"imported workflows retain their actual task and authorization choices")
+var latestRecipe=WorkflowRecipe();latestRecipe.target = .latest;latestRecipe.hasDeadline=false;latestRecipe.graceDays=10
+let latestPlan=CLIConfig.parse(yaml:latestRecipe.proposed(from:ConfigDocument.fresh).yaml)
+check(latestPlan.auto.trackLatest && !latestPlan.auto.minorOnly && latestPlan.auto.maximumMajorVersion==0 && latestPlan.auto.majorDeadlineDays==10 && latestPlan.update.deadline.isEmpty,"latest-compatible workflows support rolling deadlines without a generation cap")
+
+
+var assistantRecipe=WorkflowRecipe(now:workflowNow,timeZoneID:"America/Chicago")
+let osQuestions=WorkflowGuide.questions(for:assistantRecipe)
+check(osQuestions.first == .goal && osQuestions.contains(.hardware) && osQuestions.last == .delivery,"Software Update opens goal-specific questions and ends with deployment mode")
+assistantRecipe.hasDeadline=false
+check(!WorkflowGuide.questions(for:assistantRecipe).contains(.enforcement),"rolling deadline answers hide irrelevant fixed-deadline enforcement questions")
+assistantRecipe.target = .current
+check(!WorkflowGuide.questions(for:assistantRecipe).contains(.hardware),"Tahoe inventory questions disappear for other update goals")
+assistantRecipe.tasks=[.apps]
+let appQuestions=WorkflowGuide.questions(for:assistantRecipe)
+check(appQuestions.contains(.apps) && !appQuestions.contains(.goal) && !appQuestions.contains(.authorization),"app-only setup asks app questions without macOS credential questions")
+assistantRecipe.tasks=[.registration]
+check(WorkflowGuide.questions(for:assistantRecipe)==[.registration,.branding,.delivery],"registration-only setup asks only relevant questions")
+assistantRecipe.tasks=[.restart]
+check(WorkflowGuide.questions(for:assistantRecipe)==[.restart,.branding,.delivery],"restart-only setup does not require OS target answers")
+assistantRecipe.tasks=[]
+check(WorkflowGuide.questions(for:assistantRecipe).isEmpty,"an empty workflow cannot show a misleading question count")
+assistantRecipe=WorkflowRecipe(now:workflowNow,timeZoneID:"America/Chicago")
+assistantRecipe.hourlyReminders=false;assistantRecipe.workingHoursOnly=true;assistantRecipe.authorization = .managed
+let reminderRecommendation=WorkflowGuide.recommend(.reminders,in:assistantRecipe)
+check(reminderRecommendation.hourlyReminders && reminderRecommendation.workingHoursOnly && reminderRecommendation.authorization == .managed && reminderRecommendation.deadline==assistantRecipe.deadline,"hourly recommendation preserves the chosen hours, credentials and deadline")
+let keychainRecommendation=WorkflowGuide.recommend(.authorization,in:assistantRecipe)
+check(keychainRecommendation.authorization == .userKeychain && keychainRecommendation.deadline==assistantRecipe.deadline && assistantRecipe.authorization == .managed,"Keychain recommendation is an explicit copied draft choice and preserves other answers")
+let inventoryRecommendation=WorkflowGuide.recommend(.hardware,in:assistantRecipe)
+check(inventoryRecommendation.includeTahoeAudit && !assistantRecipe.includeTahoeAudit,"inventory recommendation adds reporting only when selected")
+assistantRecipe.target = .current
+check(!WorkflowGuide.recommend(.hardware,in:assistantRecipe).includeTahoeAudit,"Tahoe reporting cannot be recommended into another OS generation")
+assistantRecipe.tasks=[.apps]
+let missingProvider=WorkflowGuide.solutions(for:assistantRecipe,mistOnAdmin:nil,providerOnAdmin:nil,now:workflowNow)
+check(missingProvider.contains{$0.id=="provider-local" && $0.detail.contains("Admin Mac") && $0.detail.contains("fleet")},"unverified provider advice distinguishes local evidence from fleet readiness")
+assistantRecipe=WorkflowRecipe(now:workflowNow,timeZoneID:"America/Chicago");assistantRecipe.deadline=workflowNow.addingTimeInterval(-1)
+let copyBeforeAdvice=assistantRecipe
+let expiredAdvice=WorkflowGuide.solutions(for:assistantRecipe,mistOnAdmin:nil,providerOnAdmin:nil,now:workflowNow)
+check(expiredAdvice.first?.question == .timing && assistantRecipe==copyBeforeAdvice,"an expired deadline offers a date solution without silently changing the policy")
+check(expiredAdvice.contains{$0.id=="paused" && $0.question == .delivery},"paused packages explain why reminders will not start and link to the deployment choice")
+assistantRecipe.startAfterInstall=true
+check(!WorkflowGuide.solutions(for:assistantRecipe,mistOnAdmin:true,providerOnAdmin:true,now:workflowNow).contains{$0.id=="paused"},"live selection removes the paused-package suggestion")
+assistantRecipe.authorization = .managed
+check(!WorkflowGuide.solutions(for:assistantRecipe,mistOnAdmin:true,providerOnAdmin:true,now:workflowNow).contains{$0.id=="first-authorization"},"managed authorization is not replaced by a user-password suggestion")
+
+
+let wordingRecipe=WorkflowRecipe(now:workflowNow,timeZoneID:"America/Chicago")
+let suggestedToast=WorkflowWording.suggested(.toast,recipe:wordingRecipe)
+check(suggestedToast.contains("macOS Tahoe") && suggestedToast.contains("Nov 16") && suggestedToast.contains("CST"),"suggested toast uses the selected OS and deadline time zone")
+check(!suggestedToast.contains("critical security") && !suggestedToast.contains("45–60"),"suggested wording avoids unverified security claims and installation durations")
+var customCopy=ConfigDocument.fresh;customCopy.edits["toast.message"]="My custom text";customCopy.edits["ui.sfSymbolName"]="shield.lefthalf.filled";customCopy.edits["auth.promptUserForInstall"]="false"
+let suggestedSet=WorkflowWording.applySet(recipe:wordingRecipe,to:customCopy)
+check(customCopy.setupValue("toast.message")=="My custom text" && suggestedSet.setupValue("toast.message")==suggestedToast,"suggestions preserve existing wording until explicitly applied")
+check(suggestedSet.setupValue("ui.sfSymbolName")=="shield.lefthalf.filled" && suggestedSet.setupValue("auth.promptUserForInstall")=="false","suggested message sets preserve icon and authorization choices")
+check(suggestedSet.setupValue("ui.appName")=="Software Update Required" && suggestedSet.yaml.contains("forcedInstallNotice:"),"suggested full set exports supported required-install guidance and a software-update title")
+let samplePreview=WorkflowPreviewSample.make(document:customCopy,recipe:wordingRecipe,currentMajor:27)
+check(customCopy.setupValue("update.targetVersion").isEmpty && samplePreview.currentVersion=="15.0","example device data does not overwrite the real tracking target")
+check(CLIConfig.parse(yaml:samplePreview.yaml).debug.dryRun && UIConfig.fromAdminYAML(samplePreview.yaml).toast.soundName.isEmpty,"simulation sample policy is dry-run and silent")
+let messageQuestions=WorkflowGuide.questions(for:wordingRecipe)
+check(messageQuestions.contains(.messages) && messageQuestions.firstIndex(of:.messages)!>messageQuestions.firstIndex(of:.branding)!,"guided setup offers icon selection followed by tailored copy")
+var popupTour=PopupSimulation()
+popupTour.tick(60)
+check(popupTour.index==0 && !popupTour.running,"a stopped simulation never advances on time alone")
+popupTour.response(1,automatic:false)
+check(popupTour.stage=="toast" && popupTour.message.contains("Later"),"Later is not interpreted as installation or a stage transition")
+popupTour.response(5,automatic:true)
+check(popupTour.stage=="toast" && popupTour.message.contains("not installation consent"),"simulated timeout is distinct from installation consent")
+popupTour.play();popupTour.tick(4)
+check(popupTour.progress==0.5 && popupTour.index==0,"tour progress is held only in the simulation model")
+popupTour.pause();popupTour.tick(20)
+check(popupTour.progress==0.5,"paused tour preserves its sample progress")
+popupTour.play();popupTour.tick(4)
+check(popupTour.stage=="softNudge","tour playback advances to the next popup without a system action")
+popupTour.reset()
+check(popupTour.index==0 && !popupTour.running && popupTour.progress==0,"reset clears in-memory playback state")
+var allPopupTour=PopupSimulation(stages:PopupSimulation.allStages)
+check(allPopupTour.stages.contains("authorization") && allPopupTour.stages.contains("unsupportedHardware") && allPopupTour.stages.contains("entraRegistration"),"all-popup gallery includes safe authorization, hardware and registration screens")
+allPopupTour.select("compliant");allPopupTour.response(0,automatic:false)
+check(allPopupTour.stage=="compliant","simulated acknowledgement never triggers a real install/restart transition")
+allPopupTour.select(allPopupTour.stages.last!);allPopupTour.play();allPopupTour.tick(8)
+check(!allPopupTour.running && allPopupTour.message.contains("No update"),"tour completes without leaving an automatic action armed")
+
+
+var laterDuringPlayback=PopupSimulation();laterDuringPlayback.play();laterDuringPlayback.response(1,automatic:false);laterDuringPlayback.tick(8)
+check(!laterDuringPlayback.running && laterDuringPlayback.stage=="toast","Later pauses playback so it cannot be mistaken for acceptance of the update journey")
+
+// Guided workflow readiness is draft evidence, never a fleet authorization verdict.
+let preparationNow=ISO8601DateFormatter().date(from:"2026-11-11T12:00:00Z")!
+var preparationRecipe=WorkflowRecipe(now:preparationNow,timeZoneID:"America/Chicago")
+var preparationDocument=ConfigDocument.fresh
+let pausedPreparation=WorkflowPreparation(recipe:preparationRecipe,document:preparationDocument,now:preparationNow)
+check(pausedPreparation.canBuild && pausedPreparation.items.first{$0.id=="mode"}?.kind == .attention,"paused workflows remain buildable while clearly explaining no scheduled delivery")
+check(pausedPreparation.items.first{$0.id=="authorization"}?.kind == .pilot,"draft validation never certifies saved credentials on the fleet")
+check(pausedPreparation.items.first{$0.id=="wording"}?.kind == .attention,"default toast copy is disclosed for explicit review")
+preparationRecipe.startAfterInstall=true
+preparationDocument=WorkflowWording.applySet(recipe:preparationRecipe,to:preparationDocument)
+let livePreparation=WorkflowPreparation(recipe:preparationRecipe,document:preparationDocument,now:preparationNow)
+check(livePreparation.canBuild && livePreparation.items.first{$0.id=="mode"}?.kind == .ready,"valid live draft can be built without pretending pilot requirements have passed")
+check(livePreparation.items.first{$0.id=="wording"}?.kind == .ready,"review recognizes explicitly selected custom wording")
+preparationRecipe.deadline=preparationNow.addingTimeInterval(-60)
+let expiredPreparation=WorkflowPreparation(recipe:preparationRecipe,document:preparationDocument,now:preparationNow)
+check(!expiredPreparation.canBuild && expiredPreparation.blockers.contains{$0.contains("future deadline")},"readiness blocks a past deadline before accidental live enforcement")
+preparationRecipe=WorkflowRecipe(now:preparationNow)
+preparationRecipe.tasks=[.apps,.registration,.restart]
+let combinedPreparation=WorkflowPreparation(recipe:preparationRecipe,document:ConfigDocument.fresh,now:preparationNow)
+check(Set(combinedPreparation.items.map(\.id)).isSuperset(of:["apps","entra","restart"]),"combined workflows retain provider, enrollment and signed restart prerequisites")
+check(!combinedPreparation.items.contains{$0.id=="authorization"},"app-only authorization review never invents a macOS requirement")
+preparationRecipe.tasks=[]
+check(!WorkflowPreparation(recipe:preparationRecipe,document:.fresh,now:preparationNow).canBuild,"readiness rejects a workflow with no selected task")
+check(WorkflowMessage.toast.previewState == .toast && WorkflowMessage.forced.previewState == .hardBlock && WorkflowMessage.complete.previewState == .compliant,"message selection targets its matching preview role")
+check(WorkflowStep.allCases.map(\.title)==["Choose goal","Customize","Simulate","Check readiness","Build"],"one workflow keeps customization, simulation and readiness ahead of packaging")
+check(preparationDocument.setupValue("auth.promptUserForInstall")==ConfigDocument.fresh.setupValue("auth.promptUserForInstall"),"readiness and message preparation preserve credential policy")
+
+// Saved workflows are immutable copies with self-contained images and no Keychain access.
+let libraryTemp=FileManager.default.temporaryDirectory.appendingPathComponent("push-workflow-library-tests-"+UUID().uuidString)
+defer {try? FileManager.default.removeItem(at:libraryTemp)}
+let testLibrary=WorkflowLibrary(folder:libraryTemp)
+var reusableRecipe=WorkflowRecipe(now:preparationNow,timeZoneID:"America/Chicago")
+reusableRecipe.startAfterInstall=true
+var rawReusableDocument=ConfigDocument()
+rawReusableDocument.source="auth:\n  localPassword: \"do-not-persist\"\nui:\n  orgName: \"Example IT\"\n"
+var reusableDoc=reusableRecipe.proposed(from:rawReusableDocument)
+reusableDoc=WorkflowWording.applySet(recipe:reusableRecipe,to:reusableDoc)
+let reusableLogo=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
+reusableDoc.edits["ui.logoPath"]=deployedPopupLogoPath;reusableDoc.logoImageData=reusableLogo
+let reusableWallpaper=WallpaperAssetReference(role:"noncompliant",digest:WallpaperAssetImage.digest(reusableLogo),originalName:"test.png")
+reusableDoc.wallpaperAssets=["noncompliant":reusableWallpaper];reusableDoc.edits["compliance.nonCompliantWallpaper"]=reusableWallpaper.deployedPath
+let reusable=try SavedWorkflow(name:"Tahoe pilot",document:reusableDoc,wallpaperData:[reusableWallpaper.fileName:reusableLogo],now:preparationNow)
+try testLibrary.save(reusable)
+let reloaded=try testLibrary.load(reusable.id)
+let restoredWorkflow=reloaded.restoredDocument()
+let firstSavedList=try testLibrary.list()
+check(firstSavedList.count==1,"saving a named workflow creates a discoverable library copy")
+check(restoredWorkflow.logoImageData==reusableLogo && reloaded.wallpaperData[reusableWallpaper.fileName]==reusableLogo,"saved workflows retain the icon and custom wallpaper bytes")
+check(restoredWorkflow.workflowRecipe==reusableRecipe && restoredWorkflow.setupValue("toast.message")==reusableDoc.setupValue("toast.message"),"saved workflows restore policy choices and custom messages")
+let archiveBytes=try Data(contentsOf:libraryTemp.appendingPathComponent(reusable.id.uuidString+".json"))
+check(!String(decoding:archiveBytes,as:UTF8.self).contains("do-not-persist"),"known credential values do not enter saved workflow files")
+let afterRestore=WorkflowBaseline.capture(restoredWorkflow,name:"Current")
+check(WorkflowComparison(baseline:restoredWorkflow.workflowBaseline,current:afterRestore).changes.isEmpty,"loading a saved workflow establishes a matching baseline without false changes")
+check(reloaded.document.workflowBaseline==nil,"saved workflows never accumulate recursive comparison history")
+var resaveRejected=false;do{try testLibrary.save(reusable)}catch{resaveRejected=true}
+let unchangedArchive=try Data(contentsOf:libraryTemp.appendingPathComponent(reusable.id.uuidString+".json"))
+check(resaveRejected && unchangedArchive==archiveBytes,"saving the same identifier cannot overwrite an earlier copy")
+var changedWorkflow=restoredWorkflow
+changedWorkflow.edits["update.deadline"]="2026-12-01T23:00:00Z"
+changedWorkflow.edits["toast.message"]="A new message"
+changedWorkflow.edits["auth.promptUserForInstall"]="false"
+changedWorkflow.logoImageData=Data("changed image bytes".utf8)
+let comparison=WorkflowComparison(baseline:restoredWorkflow.workflowBaseline,current:WorkflowBaseline.capture(changedWorkflow,name:"Changed"))
+check(Set(comparison.changes.map(\.id)).isSuperset(of:["update.deadline","toast.message","auth.promptUserForInstall","asset.popupLogo"]),"comparison catches deadlines, messages, authorization and image changes at an unchanged deployed path")
+check(comparison.changes.first?.affectsEnforcement==true,"enforcement-impacting changes are presented before wording changes")
+check(!WorkflowChange(id:"ui.deadlineMessage",title:"Deadline message",before:"Old",after:"New").affectsEnforcement,"editing deadline notice wording is not mislabeled as an enforcement-policy change")
+check(comparison.report.contains("A new message") && comparison.report.contains("Before:") && !comparison.report.contains("do-not-persist"),"exportable change review shows before/after values without known credentials")
+check(WorkflowComparison(baseline:nil,current:afterRestore).report.contains("first-package review"),"a first build does not falsely claim that nothing changed")
+let secondCopy=try SavedWorkflow(name:"Tahoe pilot",document:restoredWorkflow,wallpaperData:reloaded.wallpaperData,now:preparationNow.addingTimeInterval(1))
+try testLibrary.save(secondCopy)
+let secondSavedList=try testLibrary.list()
+check(secondSavedList.count==2,"saving the same workflow name preserves both copies")
+check(secondSavedList.first?.id==secondCopy.id,"newest saved copy appears first")
+var missingWallpaperRejected=false;do{_=try SavedWorkflow(name:"Broken",document:restoredWorkflow,wallpaperData:[:])}catch{missingWallpaperRejected=true}
+check(missingWallpaperRejected,"missing custom image bytes cannot create an incomplete saved workflow")
+var injectedAssetRejected=false;do{_=try SavedWorkflow(name:"Broken",document:restoredWorkflow,wallpaperData:["../escape.png":reusableLogo])}catch{injectedAssetRejected=true}
+check(injectedAssetRejected,"archive image paths must match validated selected digest references")
+var oldDocumentJSON=try JSONSerialization.jsonObject(with:JSONEncoder().encode(reusableDoc)) as! [String:Any]
+oldDocumentJSON.removeValue(forKey:"workflowBaseline");oldDocumentJSON.removeValue(forKey:"workflowDraftID")
+let compatibleDocument=try JSONDecoder().decode(ConfigDocument.self,from:JSONSerialization.data(withJSONObject:oldDocumentJSON))
+check(compatibleDocument.workflowBaseline==nil && compatibleDocument.workflowRecipe==reusableRecipe,"existing Admin drafts remain readable without comparison metadata")
+var extraField=ConfigDocument.load(restoredWorkflow.yaml+"\norganizationPolicy:\n  channel: pilot\n",name:"Extra")
+let extraBaseline=WorkflowBaseline.capture(extraField,name:"Old")
+extraField.source=extraField.source.replacingOccurrences(of:"channel: pilot",with:"channel: general")
+check(WorkflowComparison(baseline:extraBaseline,current:WorkflowBaseline.capture(extraField,name:"New")).changes.contains{$0.id=="organizationPolicy.channel"},"additional simple YAML fields participate in comparison")
+check(WorkflowBaseline.capture(restoredWorkflow,name:"Again").values==afterRestore.values,"comparison snapshots are deterministic across repeated captures")
+
+// Self Service profiles are isolated production requests, never scheduled policy.
+var offerDocument=ConfigDocument.fresh
+for key in ["auto.enabled","auto.trackLatest","update.autoInstallAfterDeadline","apps.enabled","entra.enabled","uptime.enabled","compliance.wallpaperEnabled"] {offerDocument.edits[key]="true"}
+offerDocument.edits["update.deadline"]="2026-01-01T00:00:00Z"
+for major in [26,27] {
+    let profile=try SelfServiceKit.profile(offerDocument,major:major),parsed=CLIConfig.parse(yaml:profile.yaml)
+    check(!parsed.auto.enabled && !parsed.auto.trackLatest && parsed.update.deadline.isEmpty && !parsed.update.autoInstallAfterDeadline,"Self Service profile excludes campaign timing \(major)")
+    check(!parsed.apps.enabled && !parsed.entra.enabled && !parsed.uptime.enabled && !parsed.compliance.wallpaperEnabled,"Self Service profile excludes unrelated modules \(major)")
+    check(parsed.auth.promptUserForInstall && !parsed.debug.dryRun && parsed.auto.maximumMajorVersion==major,"Self Service profile authorizes on demand in the selected generation \(major)")
+    check(SelfServiceKit.script(major:major).contains("self-service-upgrade --major \(major)") && !SelfServiceKit.script(major:major).contains("auto-check"),"Self Service script calls isolated workflow \(major)")
+}
+check(offerDocument.setupFlag("auto.enabled") && offerDocument.setupFlag("entra.enabled"),"Self Service generation leaves original draft intact")
+check(SelfServiceKit.states==["downloading","installing","preflightDisk","preflightPower","rebooting"],"Self Service preview includes download, preparation, preflight and restart stages")
+var customOffer=ConfigDocument.fresh
+customOffer.edits["ui.logoPath"]=deployedPopupLogoPath;customOffer.logoImageData=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
+let customOfferProfile=try SelfServiceKit.profile(customOffer,major:26)
+check(customOfferProfile.value("ui.logoPath")==SelfServiceKit.logoPath && customOfferProfile.logoImageData != nil,"offer icon is normalized and packaged under an isolated asset path")
+var archivedOffer=SelfServiceSettings();archivedOffer.offer27=false;customOffer.selfServiceSettings=archivedOffer
+let savedOffer=try SavedWorkflow(name:"Self Service fixture",document:customOffer,wallpaperData:[:])
+check(savedOffer.restoredDocument().selfServiceSettings?.offer27==false,"saved workflows preserve Self Service choices")
+var emptyOffers=SelfServiceSettings();emptyOffers.offer26=false;emptyOffers.offer27=false
+do{try emptyOffers.validate();check(false,"empty offers rejected")}catch{check(true,"empty offers rejected")}
+if let clientPath=ProcessInfo.processInfo.environment["PUSH_SELF_SERVICE_CLIENT"],let folder=ProcessInfo.processInfo.environment["PUSH_SELF_SERVICE_FOLDER"] {
+    let output=URL(fileURLWithPath:folder)
+    try SelfServiceKit.write(document:.fresh,settings:SelfServiceSettings(),client:URL(fileURLWithPath:clientPath),to:output)
+    let plan=try JSONSerialization.jsonObject(with:Data(contentsOf:output.appendingPathComponent("Jamf-policy-plan.json"))) as! [String:Any]
+    let policies=plan["policies"] as! [[String:Any]]
+    check(policies.count==2 && policies.allSatisfy{($0["automaticTriggers"] as? [String])==[] && ($0["scriptPriority"] as? String)=="After" && ($0["executionFrequency"] as? String)=="Ongoing"},"export includes two ongoing Self Service policies without automatic triggers")
+    let manifest=try JSONSerialization.jsonObject(with:Data(contentsOf:output.appendingPathComponent("manifest.json"))) as! [String:Any]
+    for entry in manifest["files"] as! [[String:String]] {let bytes=try Data(contentsOf:output.appendingPathComponent(entry["path"]!));check(DeploymentBundle.digest(bytes)==entry["sha256"],"Self Service manifest verifies "+entry["path"]!)}
+    let expanded=output.deletingLastPathComponent().appendingPathComponent("self-service-payload-"+UUID().uuidString)
+    try ConfiguredClientBuilder.command("/usr/sbin/pkgutil",["--expand-full",output.appendingPathComponent("PUSH-SelfService-Profiles.pkg").path,expanded.path],folder:output)
+    defer{try? FileManager.default.removeItem(at:expanded)}
+    check(!FileManager.default.fileExists(atPath:expanded.appendingPathComponent("Scripts").path),"offer profile package has no installation scripts or service activation")
+    try ConfiguredClientBuilder.checkPayload(expanded.appendingPathComponent("Payload"),allowed:["Library/Management/PUSH/self-service/macOS-26.yaml","Library/Management/PUSH/self-service/macOS-27.yaml"])
+    check(true,"offer package payload cannot replace main policy, state, apps or launch jobs")
+    for major in [26,27] {let p=Process();p.executableURL=URL(fileURLWithPath:"/bin/bash");p.arguments=["-n",output.appendingPathComponent("Jamf-Offer-macOS-\(major).sh").path];try p.run();p.waitUntilExit();check(p.terminationStatus==0,"Jamf offer script syntax valid \(major)")}
+    do{try SelfServiceKit.write(document:.fresh,settings:SelfServiceSettings(),client:URL(fileURLWithPath:clientPath),to:output);check(false,"offer export refuses overwrite")}catch{check(true,"offer export refuses overwrite")}
+}
+var customDownload=ConfigDocument.fresh
+for (key,value) in [("downloadHeader","Your IT team"),("downloadTitle","Preparing {macOS}"),("downloadingMessage","You can keep working. Your files stay in place."),("downloadFooter","Keep power and Wi-Fi connected.")] {customDownload.edits["ui."+key]=value}
+for major in [26,27] {
+    let offer=try SelfServiceKit.profile(customDownload,major:major),popup=UIConfig.fromAdminYAML(offer.yaml),engineCopy=CLIConfig.parse(yaml:offer.yaml)
+    check(popup.ui.downloadHeader=="Your IT team" && popup.ui.downloadTitle=="Preparing {macOS}" && popup.ui.downloadingMessage=="You can keep working. Your files stay in place." && popup.ui.downloadFooter=="Keep power and Wi-Fi connected.","custom download wording reaches exported popup config \(major)")
+    check(engineCopy.ui.downloadTitle==popup.ui.downloadTitle && engineCopy.ui.downloadFooter==popup.ui.downloadFooter,"engine and Admin agree on download copy \(major)")
+    check(popup.friendlyTargetVersion==(major==26 ? "macOS Tahoe 26.0":"macOS 27.0"),"Self Service preview preserves the explicit numeric release label \(major)")
+    check(popup.downloadCopy(popup.ui.downloadTitle)=="Preparing "+popup.friendlyTargetVersion,"Admin preview expands the custom heading for each offer \(major)")
+}
+let oldDownload=UIConfig.fromAdminYAML("update:\n  macOSName: macOS 26\n  targetVersion: 26\n")
+check(oldDownload.friendlyTargetVersion=="macOS 26" && oldDownload.downloadCopy(oldDownload.ui.downloadTitle)=="Downloading macOS 26","older offer profiles are fixed without YAML editing")
+let storedDownload=try SavedWorkflow(name:"Custom download copy",document:customDownload,wallpaperData:[:]).restoredDocument()
+check(storedDownload.setupValue("ui.downloadTitle")=="Preparing {macOS}" && storedDownload.setupValue("ui.downloadFooter")=="Keep power and Wi-Fi connected.","download wording survives saved workflow roundtrip")
+try await runJamfPublisherChecks()
+let commentImport=ConfigDocument.load("update:\n  deadline: \"\" # blank override\nui:\n  appName: \"Team #1\" # label\n",name:"Comment import")
+check(commentImport.setupValue("update.deadline").isEmpty && commentImport.setupValue("ui.appName")=="Team #1","Admin imports quoted blank deadlines and messages without trailing comments")
+check(CLIConfig.parse(yaml:commentImport.yaml).update.deadline.isEmpty && DashboardConfig.parse(yaml:commentImport.yaml).update.deadline.isEmpty,"Admin export and dashboard agree with the corrected client deadline parser")
+let popupCommentFile=FileManager.default.temporaryDirectory.appendingPathComponent("push-comment-config-"+UUID().uuidString+".yaml")
+try Data("update:\n  deadline: \"\" # blank\nui:\n  appName: \"Team #1\" # label\n".utf8).write(to:popupCommentFile)
+let popupComment=UIConfig.load(from:popupCommentFile.path)
+check(popupComment.update.deadline.isEmpty && popupComment.ui.appName=="Team #1","popup parser uses the same comment-aware scalar handling")
+try FileManager.default.removeItem(at:popupCommentFile)
 print("Passed \(checks) offline checks. No app, Mist query, Keychain operation, admin action, upgrade, or restart was executed.")

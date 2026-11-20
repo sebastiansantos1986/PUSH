@@ -32,3 +32,16 @@ config-backups/
 *.pem
 .vscode/
 .idea/
+# Reviewed vendored prerequisite; license, provenance and SHA-256 ship with it.
+!PUSH-Admin/Resources/mist-cli.2.3.pkg
+# Local exports, diagnostics and signing material
+Publisher/
+PUSH-Configured-Deployment/
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.cer
+*.pfx
+*.csr
+*.bak
+*.tmp

@@ -1,0 +1,298 @@
+PUSH Client 1.9.1 / PUSH Admin 1.0.0 / JamfCheckIn 1.1.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+TWO INSTALLERS
+PUSH-Client-1.9.1.pkg: employee computers — PUSH engine, popups and JamfCheckIn.
+PUSH-Admin-1.0.0.pkg: IT computers only — configuration, previews and deployment export.
+The client contains no PUSH Admin app and no separate PUSH Status menu.
+
+YOUR LOCAL TEST
+1. Quit PUSH Admin and JamfCheckIn; let active PUSH workflows finish.
+2. Install PUSH-Client-1.9.1.pkg yourself. Previous files are backed up; existing
+   PUSH policy/state/credentials/assets and JamfCheckIn preferences are preserved.
+   The old PUSH Status app/agent is retired after backup. Both PUSH monitors pause.
+3. Open /Applications/JamfCheckIn.app yourself to see its integrated PUSH card.
+   It otherwise starts at the next graphical login. Nothing launches during install.
+4. On your IT/test Mac, install PUSH-Admin-1.0.0.pkg separately. Open PUSH Admin,
+   then Deployment > Export deployment bundle. This does not apply policy or install
+   profiles. Use the recovery preview under User Status & Recovery for safe UI tests.
+5. Read the exported READ-ME-FIRST before any managed activation. The client installer
+   deliberately does not enable the update monitor, check-in daemons, or registration.
+
+DEPLOYMENT EXPORT
+Includes the matching client package, YAML, selected custom logo/wallpapers, default
+wallpaper, notification/background-item profiles, hash manifest, a policy-package
+builder and a separate explicit activation script. It never includes PUSH Admin.
+Custom images from an imported YAML must be selected again if they are not staged;
+export stops rather than silently dropping them. Known plaintext credential fields
+are removed; review custom settings for secrets before fleet distribution.
+
+Pause existing monitoring before changing profiles. Profile first, then client installer, then policy package while monitoring is paused.
+Validate authorization on a managed pilot; only then enable the reviewed policy with
+the separate root activation script. Activation starts real checks and can install.
+Background approval is not service installation or upgrade authorization.
+
+LOCAL BUILD LIMITS
+Universal Intel/Apple Silicon, macOS 14+. Apps are ad-hoc signed and installers
+unsigned. These are local verification artifacts, not a notarized production release.
+A supplied Team ID constrains profile rules but does not sign anything. Use verified
+Developer ID signatures and notarization before fleet rollout. MDM must deliver the
+Background Items profile; your unenrolled Mac cannot validate managed approval.
+
+PUSH REQUESTS
+JamfCheckIn reads saved status/progress and sends short-lived target/user-bound update
+requests. The privileged worker checks live policy and installation safety. No user
+password prompt is used for PUSH requests. They wait until the next worker check,
+normally five minutes; an active prompt/workflow may delay them. Use Show current
+PUSH notice to respond to an existing recovery popup immediately. Acknowledgements
+are not proof of a successful installation. Expired/changed-target requests are rejected.
+Pre-existing Jamf check-in/inventory administrator actions remain separate and can
+still require administrator approval. Existing Jamf daemon configurations are not
+silently altered or newly activated by this client package.
+
+MENU SETTING
+ui.menuBarEnabled controls the PUSH card in JamfCheckIn; it does not hide unrelated
+JamfCheckIn features. Do not install the old combined Admin/client package on employees.
+If an older package already placed PUSH Admin on an employee Mac, remove that app
+through your management tool after review; the client does not silently delete it.
+The new installer backs up and verifies the existing JamfCheckIn app identity before
+replacement. Unsafe paths or ownership stop installation for review.
+
+ACCESS PROFILES
+Includes only notification settings and exact managed background identities.
+No broad team/prefix matches or Full Disk Access/Accessibility/Screen Recording grants
+are included. Optional uptime restart enforcement uses System Events automation;
+Admin requires a verified Developer ID-signed push-cli to export its narrowly scoped
+AppleEvents PPPC profile. The local ad-hoc client does not match that production
+approval. Ordinary status/update deployments use the two baseline profiles. Optional diagnostics need pilot verification.
+PUSH popup windows are separate from native notification banners. Profile approval
+cannot guarantee visibility through every Focus mode or logged-out session.
+https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.servicemanagement.yaml
+https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.notificationsettings.yaml
+
+The original Desktop PUSH and JamfCheckIn projects are untouched. Build and offline
+fixture tests do not launch PUSH, change wallpaper, run Jamf, install profiles,
+enable monitoring, register, download/install macOS or restart this Mac.
+
+HISTORICAL RECOVERY/WALLPAPER REFERENCE (old installer names are superseded above)
+PUSH User Status & Deadline Recovery — engine 1.9.0 / Admin 0.9.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+INSTALL AND OPEN IT YOURSELF
+1. Quit PUSH Admin; finish any active PUSH workflow.
+2. Install PUSH-Status-Recovery-0.9.0.pkg.
+3. Open /Applications/PUSH Admin.app > User Status & Recovery.
+4. Use the safe recovery preview to inspect the countdown or IT-blocked example.
+5. Open the installed status menu with the button on that page.
+
+Installation backs up previous files, preserves installed policy/credentials/state/assets,
+and pauses both update and registration monitors. It does not launch apps, enable
+monitoring, download/install updates, change wallpaper, register or restart the Mac.
+The Desktop project is untouched. These are unsigned local test installers with
+ad-hoc signed universal binaries for macOS 14+ (Apple Silicon and Intel).
+
+DEADLINE FAILURE RECOVERY
+After a failed post-deadline installation, PUSH saves a sanitized failure reason.
+The next eligible automatic check presents the recovery notice. Update now requests
+an immediate guarded retry. Otherwise the default countdown is 10 minutes. Closing
+the window does not reset the saved clock. A displayed notice is required before an
+automatic retry. A closed window is retried by a later eligible monitor run, not by
+a separate background timer. Logged-out sessions do not get a recovery installation.
+
+Automatic retries re-read live policy and recheck the target, authorization, installer
+activity, pending reboot, DDM, meeting policy, disk and power. Repeated failures have
+at least 30 minutes between automatic attempts, with a maximum of 3 in a rolling
+24 hours (per target). Credentials, signature/version validation and corrupt state
+need IT attention; a countdown does not bypass them. Explicit retries still run
+preflight. Staging an installer is not a verified successful OS upgrade. A confirmed
+restart that misses the required target returns to failure recovery.
+
+YAML OVERRIDES (Admin > User Status & Recovery writes these)
+update:
+  deadlineRecoveryEnabled: true
+  retryCountdownMinutes: 10
+  retryBackoffMinutes: 30
+  maxAutomaticRetriesPerDay: 3
+  allowUserUpdateRequests: true
+ui:
+  menuBarEnabled: true
+The existing update.deadline remains the explicit deadline override. Automatic retry
+also requires auto.enabled, no dry-run, and deadline automatic installation enabled.
+A fresh installation keeps automation OFF and dry-run ON. Existing settings remain.
+
+STATUS MENU
+Reads installed policy, saved results, local progress and monitor status every 30s;
+it does not run catalog, Keychain, registration or update checks just by opening.
+Shows the target, deadline, next toast and saved failure/recovery progress when present.
+Update requests are typed, short-lived, bound to the logged-in user and target and
+passed through a private user-owned request file. Root revalidates them. The normal
+monitor interval is 5 minutes; an active popup or workflow may delay processing.
+Use Show current PUSH notice to return to an existing recovery window and choose
+Update now there. Reminder requests cannot postpone a passed deadline or hourly toast.
+
+The installer adds only a user LaunchAgent for the status menu; it starts at the next
+graphical login, not during installation. It does not enable the privileged update
+monitor. Quit status menu does not stop updates. Disable menuBarEnabled to keep the
+status menu off on subsequent launches. LaunchAgent/app removal requires admin deployment.
+
+SAFE PREVIEW
+Use the Admin recovery preview: its countdown/buttons are simulated, never installation.
+Do not create a real installation failure or change a deadline just to test this UI.
+Only enable production monitoring after reviewing readiness and your saved policy.
+This build has offline fixtures and universal build/package checks; live GUI, reboot,
+and unattended-upgrade behavior still need your managed pilot Mac.
+
+PREVIOUS FEATURES AND TEST REFERENCE
+PUSH Wallpaper & Delivery History — engine 1.8.0 / Admin 0.8.0
+Developer: Sebastian Santos
+Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
+
+INSTALL AND OPEN IT YOURSELF
+1. Quit PUSH Admin and allow active PUSH commands/workflows to finish.
+2. Install PUSH-Wallpaper-History-0.8.0.pkg.
+3. Open /Applications/PUSH Admin.app.
+4. Use Wallpaper and Delivery History in the sidebar.
+
+The combined local-test package backs up previous files and pauses both monitors.
+Installed configuration/state/credentials and custom assets are preserved. It does
+not launch PUSH, change the desktop, enable monitoring, download/update macOS, update
+apps, register the Mac or restart. It includes a default PUSH background in both
+protected engine storage and the companion's preview resources. The original Desktop
+Xcode project is untouched. This is an unsigned test installer with ad-hoc signed
+universal binaries for macOS 14+, Apple Silicon and Intel.
+
+WALLPAPER SETUP
+Use your saved draft, or import installed YAML deliberately to retain current policy.
+In Wallpaper:
+- Enable compliance wallpaper. Automatic macOS checks must be enabled in the draft.
+- Choose custom background or Use PUSH default. Selection previews/stages only.
+- After compliance, choose Restore previous personal background (the default) or
+  attach a separate compliant image.
+- Review validation, export your YAML/images or Apply in Deployment.
+
+New drafts leave this module disabled. Older YAML with compliance.wallpaperEnabled
+true is honored. Other macOS/app/registration settings remain independent. Applying
+while monitors are already active changes what their future checks use; the wizard
+and image picker themselves never apply or activate anything.
+
+MANAGED WORKING DIRECTORY
+/Library/Management/PUSH/assets/wallpapers
+
+Custom image formats supported by the macOS image picker are normalized into a
+static PNG, at most 4096 pixels on the long edge. Original files are not modified.
+The normalized image gets a content-addressed filename, such as
+noncompliant-<SHA256>.png, to avoid overwriting a different existing background.
+Admin stages private copies under the user's Application Support/PUSH Admin/
+WallpaperAssets folder and stores only references in the draft, not large image
+blobs. Apply copies attached files to protected managed storage before committing
+configuration. Export writes attached PNG files alongside YAML; deploy those PNGs
+to the managed directory. Imported paths do not magically attach remote assets:
+select the image here again or ensure it is already deployed.
+
+The included default is PUSH-NonCompliant.png. A custom image can replace its role
+without overwriting that packaged default. Image selection and preview never set
+the user's current desktop. Attached-image integrity is rechecked before deployment.
+
+REASSERT WHILE NON-COMPLIANT
+Compliance here means running macOS meets the configured numeric macOS target.
+This is not proof that every app or cloud-registration requirement is compliant.
+Unknown/missing target or running version produces no wallpaper action.
+
+During each eligible live macOS run, the engine queries the console user's active
+connected displays through its matching native UI helper. If below target and the
+current desktop image is different, the managed non-compliant image is reapplied.
+There is no state-transition-only shortcut. A user changing the background does
+not stop reapplication on the next eligible check.
+
+No desktoppr installation, private wallpaper database edit, credential collection
+or AppleScript control of Finder is used. If the Mac has no desktop session, it is
+reassessed later. Dry-run does not change wallpapers. Enforcement is a recurring
+visual policy, not a security or cloud-compliance attestation.
+
+RESTORATION
+The helper saves a per-user, per-display baseline before replacing the image.
+When the target is met, it restores that readable baseline (or the configured
+compliant image), only if the current image is still the one PUSH managed. If the
+user already changed their image, that choice is preserved and enforcement stops.
+
+Baselines are private to the user under Application Support/PUSH Wallpaper. A corrupt
+baseline fails closed instead of overwriting an unknown desktop. A missing/unreadable
+original, changing display identities, dynamic/video desktops, additional Spaces,
+disconnected displays, privacy restrictions or MDM wallpaper profiles need a pilot
+test. The native operation covers active connected displays; it does not claim to
+manage every inactive Space. Select a compliant image or restore manually if a
+personal original cannot be recovered. Missing baselines are not invented.
+
+Disabling this module stops reapplication. It does not forcibly replace the current
+image with an arbitrary personal background.
+
+WALLPAPER-ONLY TEST — RUN THESE YOURSELF
+/Library/Management/PUSH/push-cli wallpaper status
+  Reads the saved wallpaper policy; it does not query/change the desktop.
+
+sudo /Library/Management/PUSH/push-cli wallpaper reconcile --dry-run
+  No desktop or OS action.
+
+sudo /Library/Management/PUSH/push-cli wallpaper reconcile
+  LIVE DESKTOP CHANGE ONLY. Uses the configured target, image and dry-run policy.
+  It never calls an OS installation/download/restart workflow or enables a service.
+  With wallpaper enabled and a non-compliant target, run it, change your background
+  manually, then run it again to verify reapplication. Review Delivery History.
+  Do not falsify your production target merely to test restoration; validate that
+  transition on a pilot Mac or a separately reviewed lab policy.
+
+For ongoing enforcement, after reviewing your INSTALLED LIVE policy:
+sudo /Library/Management/PUSH/push-cli install-daemon --interval 5m
+This activates current OS/app and enabled registration policy and may run immediately.
+It can perform other configured automatic updates; it is not a wallpaper-only test.
+The package intentionally leaves monitoring paused until you choose activation.
+
+DELIVERY HISTORY
+The new page reads /Library/Management/PUSH/notification-history.json only.
+It records new engine observations; old logs are not converted into invented events.
+- Requested: a launch was attempted; appearance is not yet proven.
+- Displayed: the window readiness signal was received in the console session.
+- User response: Install, Later, close, schedule confirmation or support action.
+- Timeout: a displayed prompt timed out; it is not mislabeled as Install/Later.
+- Completed: a power/restart result that cannot be attributed to a user click.
+- Delayed: no desktop, working-hour/meeting restrictions or selected competing work.
+- Failed: startup visibility or process failure; no user choice was inferred.
+
+Rows correlate request, display and response by attempt ID. Nonblocking progress
+launches remain delivery-unconfirmed unless a visibility signal was captured. A
+window appearance is not proof the user read it. Failure/delay retry timestamps are
+earliest recheck times, not guaranteed delivery times. Existing policy and service
+availability still apply. A stopped monitor cannot record a check it did not run;
+use Readiness to inspect actual monitor state.
+
+Engine manual previews are labeled preview and hidden by default; enable the page's
+Include engine previews toggle to see them. In-app Studio button checks remain their
+separate simulated audit. History is machine-local, capped to recent events, with
+repeated identical delay/failure rows coalesced. Reasons omit recognized credential
+content; command lines and image originals are not stored. Wallpaper outcomes also
+appear, labeled Wallpaper changed rather than notification delivery.
+
+A corrupt/oversized history file is reported unreadable rather than silently reset.
+Refresh does not launch a popup, run detection, change a wallpaper, activate a monitor
+or install anything. Prior history and managed assets are included in package backup.
+
+YAML — MERGE INTO ONE EXISTING SECTION
+compliance:
+  wallpaperEnabled: true
+  nonCompliantWallpaper: "/Library/Management/PUSH/assets/wallpapers/PUSH-NonCompliant.png"
+  compliantWallpaper: ""
+
+Empty compliantWallpaper means restore captured personal background. Root execution
+accepts only protected image paths under /Library/Management/PUSH. The helper runs
+in the user's session and refuses mismatched old UI versions.
+
+VERIFICATION
+309 engine regression checks and 257 companion offline checks passed (566 total).
+Both universal builds, attribution, parser parity, signatures, package scripts,
+asset bytes and versions are inspected. The default background was rendered and
+visually inspected as a standalone image. No PUSH app, actual desktop change,
+installer execution, real update check/download, upgrade, registration or restart
+was run by the agent. Native wallpaper and notification behavior still require
+your own pilot test. The package is not a notarized fleet deployment release.

@@ -101,6 +101,8 @@ final class AdminStore: ObservableObject {
         isRefreshingReadiness = false
     }
 
+    @Published var savedWorkflows:[SavedWorkflowInfo]=[]
+    @Published var workflowLibraryIssue=""
     @Published var document = ConfigDocument.fresh { didSet { saveDraft() } }
     @Published var groupID = "identity"
     @Published var releases: [CatalogRelease] = []
@@ -142,7 +144,7 @@ final class AdminStore: ObservableObject {
         let alert = NSAlert(); alert.messageText = "Start a new configuration draft?"
         alert.informativeText = "Export the current draft first if you want to keep a separate copy. Installed PUSH settings will not change."
         alert.addButton(withTitle:"New Draft"); alert.addButton(withTitle:"Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { document = .fresh; importedLiveConfig = false; notice = "Started a new dry-run draft." }
+        if alert.runModal() == .alertFirstButtonReturn { document = .fresh;document.workflowRecipe=WorkflowRecipe(); importedLiveConfig = false; notice = "Started a new dry-run draft." }
     }
     var cacheURL: URL {
         FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("PUSH Admin/catalog-cache.json")
@@ -189,6 +191,7 @@ final class AdminStore: ObservableObject {
         document.edits["update.macOSName"] = release.name
         let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         document.edits["update.releaseType"] = (versionParts(release.version)?.first ?? major) > major ? "major" : "minor"
+        if var workflow=document.workflowRecipe {workflow.target = .fixed;workflow.fixedVersion=release.version;document=workflow.proposed(from:document)}
         notice = "Selected macOS \(release.version) for this draft. The installed policy is unchanged."
     }
     func importDocument(_ url: URL) {
@@ -196,6 +199,7 @@ final class AdminStore: ObservableObject {
             let values = try url.resourceValues(forKeys:[.fileSizeKey]); guard (values.fileSize ?? 0) < 2_097_152 else { throw AdminError.message("Choose a YAML file smaller than 2 MB.") }
             let text = try String(contentsOf:url,encoding:.utf8)
             document = ConfigDocument.load(text,name:url.lastPathComponent)
+            document.workflowRecipe=WorkflowRecipe.from(document:document)
             importedLiveConfig = url.path == livePath
             notice = document.omittedCredentials > 0 ? "Imported settings. \(document.omittedCredentials) plaintext credential fields were omitted. The original file was not changed." : "Imported settings into a draft. The original file was not changed."
         } catch { notice = "Import failed: " + error.localizedDescription }
@@ -296,7 +300,7 @@ final class AdminStore: ObservableObject {
     }
     func changeSchedule(enable: Bool) {
         guard pushInstalled else { notice = "Install PUSH first."; return }
-        guard let version = versionParts(pushVersion), version.lexicographicallyPrecedes([1,5,0]) == false else { notice = "Scheduling from this companion requires PUSH 1.5.0 or later."; return }
+        guard let version = versionParts(pushVersion), version.lexicographicallyPrecedes([1,5,0]) == false else { notice = "Scheduling from this companion requires PUSH 1.7.0 or later."; return }
         let installed: ConfigDocument
         do {
             installed = enable ? ConfigDocument.load(try String(contentsOfFile:livePath,encoding:.utf8),name:"installed") : ConfigDocument.fresh

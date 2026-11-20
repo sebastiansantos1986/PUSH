@@ -13,7 +13,7 @@
 
 import Foundation
 
-let cliVersion = "1.11.0"
+let cliVersion = "1.16.7"
 
 func printHelp() {
     print("""
@@ -22,6 +22,7 @@ func printHelp() {
 \u{001B}[1mDETECTION & SCHEDULING\u{001B}[0m
   notice                  Standalone informational alert/toast
   hardware check --target 27 [--popup]  Apple hardware support check
+  self-service-upgrade --major 26|27 --config <installed-profile>  Live optional Self Service upgrade
   major-offer --debug     Safe optional major-upgrade simulation (no live actions)
   auto-check              Detect updates, manage nudge schedule
   auto-check --dry-run    Preview without writing anything
@@ -214,6 +215,7 @@ case "hardware": HardwareCompatibilityCommand(args:rest).run()
 case "major-offer": MajorUpgradeDemoCommand(args:rest).run()
 case "check-now":        AutoCheckCommand(args: rest + ["--check-only"]).run()
 case "notify-now":       AutoCheckCommand(args: rest + ["--notify-only"]).run()
+case "self-service-upgrade": SelfServiceUpgradeCommand(args:rest).run()
 case "install-now":      AutoCheckCommand(args: rest + ["--install-now"]).run()
 case "force":
     switch rest.first {

@@ -38,8 +38,16 @@ struct InstallCredentials {
     }
 }
 
+final class SelfServiceInstallContext {
+    var credentials:InstallCredentials?
+    var failure:String?
+    var staged=false
+}
 struct InstallWorkflow {
     let config: CLIConfig
+    var selfService:SelfServiceInstallContext?=nil
+    var configPathOverride:String?=nil
+    private var popupSuffix:String {selfService == nil ? "":" --self-service-offer"}
     // Set true when called from AutoCheck after user already clicked Install —
     // avoids showing a second confirmation popup.
     var skipInitialPrompt: Bool = false
@@ -48,6 +56,9 @@ struct InstallWorkflow {
         guard numericOSVersion(config.update.targetVersion) != nil else {
             cliError("A complete numeric macOS target version is required (for example 26.1).")
             return
+        }
+        if config.auto.maximumMajorVersion>0,let target=numericOSVersion(config.update.targetVersion)?.first,target>config.auto.maximumMajorVersion {
+            cliError("The target exceeds the selected macOS generation limit. No installation was started.");return
         }
         // Dry run exits before UI, downloads, credentials, state writes, or installer execution.
         if config.debug.dryRun {
@@ -81,6 +92,7 @@ struct InstallWorkflow {
             let support=AppleHardwareReader.assessment(target:config.update.targetVersion)
             if support.state == .unsupported {
                 let message="Hardware is not supported for the selected macOS major. "+support.reason
+                if selfService != nil {showError(message,uiPath:resolveUIBinary(),cfgPath:configPathOverride ?? resolvedConfigPath ?? "");return}
                 cliError(message);InstallRecoveryStore.failure(config:config,message:message)
                 _=StandalonePopupLauncher.show(support.notice());return
             }
@@ -97,14 +109,26 @@ struct InstallWorkflow {
         cliLog("[Install] caffeinate started (attached to PID \(caffeinatePID)) — sleep prevented")
 
         let uiPath  = resolveUIBinary()
-        let cfgPath = resolvedConfigPath ?? ""
+        let cfgPath = configPathOverride ?? resolvedConfigPath ?? ""
+        if selfService != nil {
+            guard offerPreflight(uiPath:uiPath,cfgPath:cfgPath) else{return}
+            if isAppleSilicon(){selfService?.credentials=resolveInstallCredentials(uiPath:uiPath,cfgPath:cfgPath,skipInitialPrompt:true,contextLabel:"Self Service")}
+            guard credentialsAreUsable(selfService?.credentials,uiPath:uiPath,cfgPath:cfgPath) else{return}
+            cliLog("[Auth] Self Service authorization accepted; credentials remain in memory until installer handoff.")
+        }
 
-        // ── Step 1: Native pending update? ─────────────────────────────────
-        if config.update.releaseType != "major",
-           let label = findPendingNativeUpdate(version: config.update.targetVersion) {
-            cliLog("[Install] Native pending update found: '\(label)'")
-            installNativePendingUpdate(label: label, uiPath: uiPath, cfgPath: cfgPath)
-            return
+        // Select by actual running/target generations, not a stale releaseType label.
+        let running=currentMacOSVersion()
+        let sameGeneration=numericOSVersion(running)?.first==numericOSVersion(config.update.targetVersion)?.first
+        let listing=sameGeneration ? nativeOSUpdateCatalog():("",Int32(0))
+        switch MacOSUpdateRouting.route(running:running,target:config.update.targetVersion,listing:listing.0,catalogSucceeded:listing.1==0,maximumMajor:config.auto.maximumMajorVersion,skipBetas:config.auto.skipBetas) {
+        case .compliant:cliSuccess("This Mac already meets the requested macOS version.");return
+        case .native(let update):
+            cliLog("[Install] Route: native softwareupdate; running \(running), minimum \(config.update.targetVersion), offered \(update.version), label \(update.label)")
+            cliPrint("Installing the Apple Software Update offer for macOS \(update.version) (minimum required: \(config.update.targetVersion)).")
+            installNativePendingUpdate(update:update,uiPath:uiPath,cfgPath:cfgPath);return
+        case .unavailable(let reason):showError(reason,uiPath:uiPath,cfgPath:cfgPath);return
+        case .fullInstaller:cliLog("[Install] Route: full installer for major upgrade \(running) → \(config.update.targetVersion)")
         }
 
         // ── Step 2: Find or download installer ─────────────────────────────
@@ -123,6 +147,9 @@ struct InstallWorkflow {
             exit(1)
         }
 
+        if selfService != nil {
+            beginInstall(installer:installer,uiPath:uiPath,cfgPath:cfgPath);return
+        }
         // ── Step 3: Prompt restart ──────────────────────────────────────────
         // Skip if user already clicked Install in the AutoCheck nudge popup.
         if skipInitialPrompt {
@@ -135,12 +162,7 @@ struct InstallWorkflow {
 
     // MARK: - Native pending update
 
-    private func findPendingNativeUpdate(version: String) -> String? {
-        let (output, _) = shell("/usr/sbin/softwareupdate --list 2>&1")
-        return nativeUpdateLabel(version: version, output: output, restartOnly: true)
-    }
-
-    private func installNativePendingUpdate(label: String, uiPath: String, cfgPath: String) {
+    private func installNativePendingUpdate(update:NativeOSUpdate, uiPath: String, cfgPath: String) {
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
 
@@ -157,7 +179,8 @@ struct InstallWorkflow {
 
         // Resolve credentials before showing installing UI
         var creds: InstallCredentials? = nil
-        if isAppleSilicon() {
+        if let offer=selfService {creds=offer.credentials}
+        else if isAppleSilicon() {
             creds = resolveInstallCredentials(uiPath: uiPath, cfgPath: cfgPath,
                                               skipInitialPrompt: skipInitialPrompt,
                                               contextLabel: "native path")
@@ -176,18 +199,21 @@ struct InstallWorkflow {
             return
         }
 
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart")
+        if selfService != nil {
+            guard downloadNativeOffer(update,uiPath:uiPath,cfgPath:cfgPath),offerRestartNotice(uiPath:uiPath,cfgPath:cfgPath),offerPreflight(uiPath:uiPath,cfgPath:cfgPath) else{return}
+        }
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\" --quick-restart"+popupSuffix)
         Thread.sleep(forTimeInterval: 2.0)
 
-        streamNativeInstall(label: label, creds: creds, user: user)
+        streamNativeInstall(update:update,creds:creds,user:user)
     }
 
-    private func streamNativeInstall(label: String, creds: InstallCredentials?, user: (name: String, uid: Int)) {
+    private func streamNativeInstall(update:NativeOSUpdate, creds: InstallCredentials?, user: (name: String, uid: Int)) {
         var arguments = ["asuser", String(user.uid), "/usr/bin/sudo", "-u", "root", "--",
-            "/usr/sbin/softwareupdate", "--install", label, "--restart", "--force", "--no-scan", "--agree-to-license"]
+            "/usr/sbin/softwareupdate", "--install", update.label, "--restart", "--force", "--no-scan", "--agree-to-license"]
         if let creds { arguments += ["--user", creds.username, "--stdinpass"] }
         performInstaller(executable: "/bin/launchctl", arguments: arguments, creds: creds,
-                         uiPath: resolveUIBinary(), cfgPath: resolvedConfigPath ?? "")
+                         uiPath:resolveUIBinary(),cfgPath:configPathOverride ?? resolvedConfigPath ?? "",nativeVersion:update.version)
     }
 
     private func parseNativeProgress(_ line: String) -> Double? {
@@ -198,6 +224,39 @@ struct InstallWorkflow {
               let value = Double(String(line[range]))
         else { return nil }
         return min(1.0, value / 100.0)
+    }
+
+    private func offerPreflight(uiPath:String,cfgPath:String)->Bool {
+        let checks=PreflightChecks(config:config)
+        if let result=checks.checkDisk(PreflightChecks.availableDiskGB()),case .fail(let reason,_)=result {
+            _=runUIBlocking(shellArgument(uiPath)+" --state preflightDisk --config "+shellArgument(cfgPath)+popupSuffix+" --disk-available "+String(PreflightChecks.availableDiskGB())+" --disk-required "+String(config.preflight.minDiskSpaceGB))
+            showError("Free disk space and retry the Self Service item. "+reason,uiPath:uiPath,cfgPath:cfgPath);return false
+        }
+        if let result=checks.checkBattery(),case .fail = result {
+            guard runUIBlocking(shellArgument(uiPath)+" --state preflightPower --config "+shellArgument(cfgPath)+popupSuffix)==0,checks.checkBattery()==nil else {
+                showError("Power/battery requirements were not satisfied. Retry after connecting power.",uiPath:uiPath,cfgPath:cfgPath);return false
+            }
+        }
+        return true
+    }
+    private func offerRestartNotice(uiPath:String,cfgPath:String)->Bool {
+        shell("pkill -x push-ui 2>/dev/null || true")
+        guard offerPreflight(uiPath:uiPath,cfgPath:cfgPath) else{return false}
+        let result=runUIBlocking(shellArgument(uiPath)+" --state rebooting --config "+shellArgument(cfgPath)+popupSuffix,timeoutMinutes:3)
+        guard result==0 else {showError("The restart/installation notice was not acknowledged. No installation started.",uiPath:uiPath,cfgPath:cfgPath);return false}
+        return true
+    }
+    private func downloadNativeOffer(_ update:NativeOSUpdate,uiPath:String,cfgPath:String)->Bool {
+        let progressPath="/private/var/run/com.push/download-progress"
+        try? "0\nPreparing Apple Software Update download…".write(toFile:progressPath,atomically:true,encoding:.utf8)
+        defer{try? FileManager.default.removeItem(atPath:progressPath)}
+        shell("pkill -x push-ui 2>/dev/null || true")
+        launchUIAsUser("\"\(uiPath)\" --state downloading --config "+shellArgument(cfgPath)+" --download-subtitle "+shellArgument("Downloading macOS "+update.version+" with Software Update…"))
+        let (_,status)=runDirect("/usr/sbin/softwareupdate",["--download",update.label,"--agree-to-license"]){chunk in
+            for line in chunk.components(separatedBy:.newlines){if let progress=parseNativeProgress(line){try? "\(progress)\nDownloading macOS \(update.version) with Software Update…".write(toFile:"/private/var/run/com.push/download-progress",atomically:true,encoding:.utf8)}}
+        }
+        guard status==0 else{showError("Apple Software Update download failed. Retry in Self Service or contact IT.",uiPath:uiPath,cfgPath:cfgPath);return false}
+        return true
     }
 
     // MARK: - Restart prompt
@@ -250,6 +309,7 @@ struct InstallWorkflow {
 
     private func beginInstall(installer: String, uiPath: String, cfgPath: String) {
         let checks = PreflightChecks(config: config)
+        if selfService != nil, !offerPreflight(uiPath:uiPath,cfgPath:cfgPath) {return}
 
         // Battery preflight
         if let r = checks.checkBattery(), case .fail(let reason, _) = r {
@@ -273,7 +333,8 @@ struct InstallWorkflow {
         }
 
         var creds: InstallCredentials? = nil
-        if isAppleSilicon() {
+        if let offer=selfService {creds=offer.credentials}
+        else if isAppleSilicon() {
             creds = resolveInstallCredentials(uiPath: uiPath, cfgPath: cfgPath,
                                               skipInitialPrompt: skipInitialPrompt,
                                               contextLabel: "startosinstall")
@@ -282,7 +343,7 @@ struct InstallWorkflow {
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.3)
-        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\"")
+        launchUIAsUser("\"\(uiPath)\" --state installing --config \"\(cfgPath)\""+popupSuffix)
         Thread.sleep(forTimeInterval: 2.0)
 
         runStartOSInstall(installer: installer, creds: creds,
@@ -304,15 +365,17 @@ struct InstallWorkflow {
             exit(1)
         }
 
-        try? FileManager.default.createDirectory(atPath: downloadDir,
-                                                  withIntermediateDirectories: true)
+        guard AppleInstallerTrust.prepareDownloadDirectory() else {
+            showError("PUSH could not prepare its protected installer download folder.", uiPath: uiPath, cfgPath: cfgPath)
+            return nil
+        }
 
         shell("pkill -x push-ui 2>/dev/null || true")
         Thread.sleep(forTimeInterval: 0.5)
         launchUIAsUser("\"\(uiPath)\" --state downloading --config \"\(cfgPath)\" --download-progress 0 --download-subtitle \"Preparing download…\"")
         Thread.sleep(forTimeInterval: 1.0)
 
-        let isMajor = config.update.releaseType == "major"
+        let isMajor = (numericOSVersion(version)?.first ?? 0) > (numericOSVersion(currentMacOSVersion())?.first ?? 0)
 
         // ── Major upgrade: use mist-cli first (more reliable for full installers) ──
         // mist-cli downloads directly from Apple CDN with proper retry and progress.
@@ -324,10 +387,10 @@ struct InstallWorkflow {
                 .write(toFile: "/private/var/run/com.push/download-progress", atomically: true, encoding: .utf8)
 
             let mistOK = streamDownload(
-                executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", "/Applications", "--compatible", "--force", "--no-ansi"],
+                executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", downloadDir, "--compatible", "--force", "--no-ansi"],
                 tool: "mist-cli"
             )
-            if mistOK, let found = findInstallerInApplications() {
+            if mistOK, let found = findExistingInstaller() {
                 cliLog("[Install] mist-cli succeeded: \(found)")
                 finishDownloadUI()
                 return found
@@ -357,7 +420,7 @@ struct InstallWorkflow {
             executable: "/usr/sbin/softwareupdate", arguments: ["--fetch-full-installer", "--full-installer-version", version],
             tool: "softwareupdate"
         )
-        if swuOK, let found = findInstallerInApplications() {
+        if swuOK, let found = findExistingInstaller() {
             cliLog("[Install] softwareupdate succeeded: \(found)")
             finishDownloadUI()
             return found
@@ -376,10 +439,10 @@ struct InstallWorkflow {
         }
         cliLog("[Install] Last resort — mist-cli at \(mist)")
         let mistOK2 = streamDownload(
-            executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", "/Applications", "--compatible", "--force", "--no-ansi"],
+            executable: mist, arguments: ["download", "installer", version, "application", "--output-directory", downloadDir, "--compatible", "--force", "--no-ansi"],
             tool: "mist-cli"
         )
-        if mistOK2, let found = findInstallerInApplications() {
+        if mistOK2, let found = findExistingInstaller() {
             cliLog("[Install] mist-cli (last resort) succeeded: \(found)")
             finishDownloadUI()
             return found
@@ -663,20 +726,20 @@ struct InstallWorkflow {
 
     private func runStartOSInstall(installer: String, creds: InstallCredentials?,
                                     uiPath: String, cfgPath: String) {
-        guard InstallerValidation.matches(installer, target: config.update.targetVersion) else {
-            showError("Installer product version could not be verified for the requested macOS target.", uiPath: uiPath, cfgPath: cfgPath)
-            return
+        guard let secured=AppleInstallerTrust.securedInstaller(installer) else {
+            showError("The cached installer could not be secured in PUSH's downloads folder. No installer was launched.",uiPath:uiPath,cfgPath:cfgPath);return
         }
-        // Assess the app before executing any code it contains; --usage is not a signature check.
-        let (_, trusted) = runDirect("/usr/sbin/spctl", ["--assess", "--type", "execute", installer])
-        guard trusted == 0 else {
-            showError("The macOS installer did not pass Gatekeeper verification.", uiPath: uiPath, cfgPath: cfgPath)
+        let trust=AppleInstallerTrust.validate(secured,target:config.update.targetVersion)
+        cliLog("[InstallerValidation] "+trust.reason)
+        guard trust.accepted else {
+            showError(trust.reason,uiPath:uiPath,cfgPath:cfgPath)
             return
         }
         var arguments = ["--agreetolicense", "--forcequitapps"]
+        if selfService != nil {arguments += ["--pidtosignal",String(getpid()),"--rebootdelay","180"]}
         if let creds { arguments += ["--user", creds.username, "--stdinpass"] }
-        performInstaller(executable: installer + "/Contents/Resources/startosinstall", arguments: arguments,
-                         creds: creds, uiPath: uiPath, cfgPath: cfgPath)
+        performInstaller(executable: secured + "/Contents/Resources/startosinstall", arguments: arguments,
+                         creds: creds, uiPath: uiPath, cfgPath: cfgPath,preparedRestart:selfService != nil)
     }
 
     private func credentialsAreUsable(_ creds: InstallCredentials?, uiPath: String, cfgPath: String) -> Bool {
@@ -694,32 +757,46 @@ struct InstallWorkflow {
     }
 
     private func performInstaller(executable: String, arguments: [String], creds: InstallCredentials?,
-                                  uiPath: String, cfgPath: String) {
+                                  uiPath:String,cfgPath:String,nativeVersion:String?=nil,preparedRestart:Bool=false) {
         var state = loadState()
-        state.beginInstallation(target: config.update.targetVersion, running: currentMacOSVersion(), boot: currentBootTimestamp())
+        state.beginInstallation(target:nativeVersion ?? config.update.targetVersion,running:currentMacOSVersion(),boot:currentBootTimestamp(),origin:selfService == nil ? nil:"selfService")
         do { try saveState(state) } catch {
             showError("Could not save installation state. Installation has not started.", uiPath: uiPath, cfgPath: cfgPath); return
         }
         let progressFile = "/private/var/run/com.push/install-progress"
         defer { try? FileManager.default.removeItem(atPath: progressFile) }
         var pendingOutput = ""
-        let (_, exitCode) = runDirect(executable, arguments, input: creds.map { $0.password + "\n" }) { chunk in
+        let restart=preparedRestart ? PreparedRestartObserver { child in
+            cliLog("[Install] startosinstall reported preparation complete; opening restart notice")
+            shell("pkill -x push-ui 2>/dev/null || true")
+            let response=runUIBlocking(shellArgument(uiPath)+" --state rebooting --config "+shellArgument(cfgPath)+popupSuffix+" --restart-prepared",timeoutMinutes:2)
+            if response==0,child.isRunning {kill(child.processIdentifier,SIGUSR1)}
+            else {cliLog("[Install] Restart notice did not return an acknowledgement; macOS owns the committed restart delay")}
+        }:nil
+        defer{restart?.stop()}
+        cliLog(creds == nil ? "[Auth] Starting the installer without a password payload.":"[Auth] Submitting installer authorization through private standard input; no password is logged.")
+        let (_, exitCode) = runDirectStarted(executable, arguments, input: creds.map { $0.password + "\n" },onStart:{process in restart?.started(process:process)},onOutput: { chunk in
             pendingOutput += chunk.replacingOccurrences(of: "\r", with: "\n")
             while let newline = pendingOutput.firstIndex(of: "\n") {
                 let line = String(pendingOutput[..<newline])
                 pendingOutput.removeSubrange(...newline)
                 // Never log raw installer output, which may echo authorization details.
                 if let progress = parseNativeProgress(line) {
-                    try? "\(String(format: "%.3f", min(0.99, progress)))\nPreparing macOS installation…"
+                    let phase = nativeVersion.map{version in line.lowercased().contains("download") ? "Downloading macOS \(version) with Software Update…":"Preparing macOS \(version) with Software Update…"} ?? "Preparing macOS installation…"
+                    try? "\(String(format: "%.3f", min(0.99, progress)))\n\(phase)"
                         .write(toFile: progressFile, atomically: true, encoding: .utf8)
                 }
             }
             if pendingOutput.count > 16384 { pendingOutput = String(pendingOutput.suffix(16384)) }
-        }
+        })
         if exitCode == 0 {
-            InstallRecoveryStore.staged(target:config.update.targetVersion)
+            if selfService == nil {InstallRecoveryStore.staged(target:config.update.targetVersion)}
+            selfService?.staged=true
             cliLog("[Install] Staging succeeded; awaiting post-reboot verification")
         } else {
+            if let creds,creds.fromSavedUserPassword,!validateUserPassword(account:creds.username,password:creds.password) {
+                deleteUserPasswordFromLoginKeychain(account:creds.username)
+            }
             state.failInstallation()
             do { try saveState(state) } catch { cliLog("[Install] Failed to save retry state") }
             cliLog("[Install] Installer failed with exit status \(exitCode)")
@@ -729,15 +806,12 @@ struct InstallWorkflow {
 
     // MARK: - Helpers
     private func findExistingInstaller() -> String? {
-        InstallerValidation.find(in: [managedBase + "/downloads", "/Applications"], target: config.update.targetVersion)
-    }
-    private func findInstallerInApplications() -> String? {
-        InstallerValidation.find(in: ["/Applications"], target: config.update.targetVersion)
+        InstallerValidation.findForInstall(target:config.update.targetVersion)
     }
 
     private func findMistCLI() -> String? {
         ["/usr/local/bin/mist", "/opt/homebrew/bin/mist"]
-            .first { FileManager.default.fileExists(atPath: $0) }
+            .first { FileManager.default.fileExists(atPath: $0) && (selfService == nil || selfServiceProtectedPath($0,executable:true)) }
     }
 
     /// Unified credential resolution for every install path.
@@ -751,6 +825,16 @@ struct InstallWorkflow {
     private func resolveInstallCredentials(uiPath: String, cfgPath: String,
                                            skipInitialPrompt: Bool,
                                            contextLabel: String) -> InstallCredentials? {
+        if config.auth.promptUserForInstall {
+            guard let user=consoleUser() else{return nil}
+            if let password=readUserPasswordFromLoginKeychain(account:user.name) {
+                if validateUserPassword(account:user.name,password:password) {
+                    return InstallCredentials(username:user.name,password:password,fromSavedUserPassword:true)
+                }
+                deleteUserPasswordFromLoginKeychain(account:user.name)
+            }
+            return requestConsoleInstallAuthorization(uiPath:uiPath)
+        }
         let method = selectAuthMethod(config: config)
         cliLog("[Install] Auth method selected: \(method.rawValue) (\(contextLabel))")
 
@@ -817,10 +901,107 @@ struct InstallWorkflow {
     }
 
     private func showError(_ message: String, uiPath: String, cfgPath: String) {
+        if let offer=selfService {offer.failure=message;cliError("Self Service: "+message);shell("pkill -x push-ui 2>/dev/null || true");return}
         RuntimeHealthScope.note(message,error:true)
         InstallRecoveryStore.failure(config:config,message:message)
         cliLog("[Install] Error: \(message)")
         shell("pkill -x push-ui 2>/dev/null || true"); Thread.sleep(forTimeInterval: 0.3)
         launchUIAsUser("\"\(uiPath)\" --state error --config \"\(cfgPath)\" --error \(shellArgument(message))")
     }
+}
+
+/// Only called from an installation path when explicitly enabled in YAML.
+/// Secret bytes use one private stdout pipe; stderr is discarded and never logged.
+private func requestConsoleInstallAuthorization(uiPath:String)->InstallCredentials? {
+    guard getuid()==0,let user=consoleUser(),user.uid>0 else {cliLog("[Auth] Cannot open password prompt without a root worker and active desktop user");return nil}
+    cliLog("[Auth] Opening installation authorization in the desktop session")
+    let child=Process(),output=Pipe()
+    child.executableURL=URL(fileURLWithPath:"/bin/launchctl")
+    child.arguments=["asuser",String(user.uid),"/usr/bin/sudo","-n","-H","-u","#"+String(user.uid),uiPath,"--credential-prompt",user.name]
+    child.standardInput=FileHandle.nullDevice;child.standardOutput=output;child.standardError=FileHandle.nullDevice
+    do {
+        try child.run();var data=Data()
+        while true {
+            let chunk=output.fileHandleForReading.availableData
+            if chunk.isEmpty {break}
+            guard data.count+chunk.count<=16384 else {child.terminate();child.waitUntilExit();return nil}
+            data.append(chunk)
+        }
+        child.waitUntilExit()
+        guard child.terminationStatus==0 else {
+            cliLog(child.terminationStatus==70 ? "[Auth] Password helper refused the install launcher's identity; no password was requested":"[Auth] Password helper exited with status \(child.terminationStatus); no authorization was accepted")
+            return nil
+        }
+        guard let current=consoleUser(),current.uid==user.uid,current.name==user.name,let value=InstallAuthorizationReply.decode(data,expectedAccount:user.name) else {cliLog("[Auth] Password reply was invalid or desktop user changed");return nil}
+        return InstallCredentials(username:value.account,password:value.password,fromSavedUserPassword:true)
+    }catch{cliLog("[Auth] Could not launch password helper (error code \((error as NSError).code))");return nil}
+}
+
+/// Production Self Service entry point, deliberately separate from major-offer --debug.
+struct SelfServiceUpgradeCommand {
+    let args:[String]
+    func run(){
+        guard let raw=argValue("--major",in:args),let major=Int(raw),SelfServiceOfferPolicy.supportedMajors.contains(major) else {cliError("Choose --major 26 or --major 27.");exit(2)}
+        if args.contains("--dry-run"){print("Dry run: would resolve the latest compatible stable macOS \(major) offer, check power/space, authorize if needed, download and show the restart notice. No action performed.");return}
+        guard getuid()==0,let user=consoleUser(),user.uid>0 else {cliError("Self Service upgrades require root and an active desktop user.");exit(1)}
+        guard let path=resolvedConfigPath,path==managedBase+"/self-service/macOS-\(major).yaml" else {cliError("Use the installed, isolated Self Service profile for this offer.");exit(1)}
+        var info=stat()
+        guard selfServiceProtectedPath(path),lstat(path,&info)==0,info.st_uid==0,info.st_mode&S_IFMT==S_IFREG,info.st_mode&0o022==0,
+              let base=try? loadConfig(),base.auto.maximumMajorVersion==major,!base.debug.dryRun,
+              let original=try? String(contentsOfFile:path,encoding:.utf8),preparePushRuntime() else {cliError("The Self Service profile is missing, unsafe or not enabled.");exit(1)}
+        let current=currentMacOSVersion()
+        guard let currentMajor=numericOSVersion(current)?.first else {cliError("Unable to determine macOS version.");exit(1)}
+        if currentMajor>major {cliPrint("This Mac already runs a newer generation. No downgrade or popup was requested.");return}
+        let gate=open(managedBase+"/auto-check.lock",O_CREAT|O_RDWR|O_NOFOLLOW,0o600)
+        guard gate>=0,flock(gate,LOCK_EX|LOCK_NB)==0 else {if gate>=0{close(gate)};cliError("Another PUSH workflow is running. Try Self Service later.");exit(1)}
+        defer{flock(gate,LOCK_UN);close(gate)}
+        guard installationIsActive()==false else {cliError("Another installer is active or cannot be verified. No competing update started.");exit(1)}
+        var state=loadState()
+        if state.recoverInstallation(running:current,boot:currentBootTimestamp(),target:state.installTargetVersion ?? "",active:false) != nil {try? saveState(state)}
+        guard !state.installStarted else {cliError("A previous installation still needs reboot verification.");exit(1)}
+        var candidates:[AutoCheckCommand.DetectedUpdate]=[]
+        if currentMajor==major {
+            let listing=nativeOSUpdateCatalog();guard listing.1==0 else {cliError("Apple update discovery failed. Retry this Self Service item.");exit(1)}
+            candidates=NativeOSUpdate.parse(listing.0).map{.init(version:$0.version,name:$0.title,isMajor:false,isBeta:$0.beta)}
+        }else{
+            let support=AppleHardwareReader.assessment(target:"\(major).0")
+            guard support.state != .unsupported else {cliError("This Mac does not support the selected generation. Contact IT for replacement review.");exit(1)}
+            guard let mist=["/usr/local/bin/mist","/opt/homebrew/bin/mist"].first(where:{selfServiceProtectedPath($0,executable:true)}) else {cliError("IT must deploy the approved Mist CLI prerequisite for compatible major-upgrade discovery.");exit(1)}
+            do{candidates=try compatibleMistUpdates(binary:mist,current:current)}catch{cliError("Compatible installer discovery failed. Retry in Self Service or contact IT.");exit(1)}
+        }
+        guard let selected=SelfServiceOfferPolicy.latest(major:major,running:current,updates:candidates) else {
+            if currentMajor==major {cliPrint("No newer eligible stable macOS \(major) point release is currently offered. Nothing was installed.");return}
+            cliError("No compatible stable macOS \(major) installer is offered for this Mac. Contact IT.");exit(1)
+        }
+        guard var effective=SelfServiceOfferPolicy.isolated(base,major:major,version:selected.version,running:current) else {cliError("The selected offer did not satisfy generation safeguards.");exit(1)}
+        let installedPath=managedBase+"/config.yaml"
+        if selfServiceProtectedPath(installedPath),let installed=try? CLIConfig.load(from:installedPath) {
+            effective=SelfServiceOfferPolicy.withManagedAuthorization(effective,installed:installed)
+        }
+        var yaml=original
+        for (section,key,value) in [("update","targetVersion",selected.version),("update","macOSName",effective.update.macOSName),("update","releaseType",currentMajor<major ? "major":"minor"),("update","deadline",""),("auth","localPassword",""),("jamfLAPS","clientSecret","")] {yaml=updatingYAMLString(yaml,section:[section],field:key,value:value)}
+        let folder=URL(fileURLWithPath:"/private/var/run/com.push/self-service-"+UUID().uuidString)
+        do{try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:false,attributes:[.posixPermissions:0o755]);try Data(yaml.utf8).write(to:folder.appendingPathComponent("ui.yaml"));try FileManager.default.setAttributes([.posixPermissions:0o644],ofItemAtPath:folder.appendingPathComponent("ui.yaml").path)}catch{cliError("Could not prepare the isolated offer presentation.");exit(1)}
+        defer{try? FileManager.default.removeItem(at:folder)}
+        let offer=SelfServiceInstallContext();defer{offer.credentials=nil}
+        cliPrint("Self Service selected macOS \(selected.version). Campaign configuration, deadlines and deferrals remain unchanged.")
+        InstallWorkflow(config:effective,selfService:offer,configPathOverride:folder.appendingPathComponent("ui.yaml").path,skipInitialPrompt:true).run()
+        guard offer.staged else {cliError(offer.failure ?? "The upgrade was not staged. Retry the Self Service item when ready.");exit(1)}
+        cliSuccess("macOS installation was accepted/staged. Completion is verified after restart; this is not a completed-upgrade claim.")
+    }
+}
+
+// Do not execute a user-writable discovery binary as root or load an offer from
+// a replaceable parent directory. Root-protected symlinks resolve to checked paths.
+func selfServiceProtectedPath(_ path:String,executable:Bool=false)->Bool {
+    let resolved=URL(fileURLWithPath:path).resolvingSymlinksInPath().path
+    for candidate in Set([path,resolved]) {
+        var cursor=candidate
+        while cursor != "/" {
+            var entry=stat()
+            guard lstat(cursor,&entry)==0,entry.st_uid==0,entry.st_mode&0o022==0 else{return false}
+            cursor=URL(fileURLWithPath:cursor).deletingLastPathComponent().path
+        }
+    }
+    return !executable || FileManager.default.isExecutableFile(atPath:resolved)
 }

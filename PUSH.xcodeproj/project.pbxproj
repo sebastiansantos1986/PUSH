@@ -46,7 +46,7 @@
 		U103 /* UIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F103 /* UIState.swift */; };
 		U104 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F104 /* SharedComponents.swift */; };
 		U105 /* PopupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F105 /* PopupViews.swift */; };
-		U106 /* InstallAssistant.icns in Resources */ = {isa = PBXBuildFile; fileRef = F106 /* InstallAssistant.icns */; };
+		U106 /* PUSH.icns in Resources */ = {isa = PBXBuildFile; fileRef = F106 /* PUSH.icns */; };
 		U201 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = F201 /* main.swift */; };
 		U202 /* CLIHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = F202 /* CLIHelpers.swift */; };
 		U203 /* CLIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F203 /* CLIConfig.swift */; };
@@ -72,7 +72,7 @@
 		U303 /* UIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F103 /* UIState.swift */; };
 		U304 /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F104 /* SharedComponents.swift */; };
 		U305 /* PopupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F105 /* PopupViews.swift */; };
-		U306 /* InstallAssistant.icns in Resources */ = {isa = PBXBuildFile; fileRef = F106 /* InstallAssistant.icns */; };
+		U306 /* PUSH.icns in Resources */ = {isa = PBXBuildFile; fileRef = F106 /* PUSH.icns */; };
         MJD_PUI = {isa = PBXBuildFile; fileRef = MJD_POL; };
         MJD_PCL = {isa = PBXBuildFile; fileRef = MJD_POL; };
         MJD_PPV = {isa = PBXBuildFile; fileRef = MJD_POL; };
@@ -124,7 +124,7 @@
 		F103 /* UIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIState.swift; sourceTree = "<group>"; };
 		F104 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 		F105 /* PopupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupViews.swift; sourceTree = "<group>"; };
-		F106 /* InstallAssistant.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = InstallAssistant.icns; sourceTree = "<group>"; };
+		F106 /* PUSH.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = PUSH.icns; sourceTree = "<group>"; };
 		F201 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		F202 /* CLIHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIHelpers.swift; sourceTree = "<group>"; };
 		F203 /* CLIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIConfig.swift; sourceTree = "<group>"; };
@@ -263,7 +263,7 @@
 				F103 /* UIState.swift */,
 				F104 /* SharedComponents.swift */,
 				F105 /* PopupViews.swift */,
-				F106 /* InstallAssistant.icns */,
+				F106 /* PUSH.icns */,
                 WALLUF1, RECV001, STATUSF1, MJD_VIEW, MJD_PRES, SNOTF, SNOTP,
 			);
 			path = "push-ui";
@@ -368,7 +368,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				U106 /* InstallAssistant.icns in Resources */,
+				U106 /* PUSH.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -376,7 +376,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				U306 /* InstallAssistant.icns in Resources */,
+				U306 /* PUSH.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -482,8 +482,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -495,8 +495,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_NAME = "push-cli";
@@ -508,10 +508,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_KEY_CFBundleIconFile = PUSH;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				OTHER_SWIFT_FLAGS = "-framework IOKit";
 				PRODUCT_BUNDLE_IDENTIFIER = com.push.previewhost;
@@ -524,10 +525,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
 				GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_KEY_CFBundleIconFile = PUSH;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				OTHER_SWIFT_FLAGS = "-framework IOKit";
 				PRODUCT_BUNDLE_IDENTIFIER = com.push.previewhost;
@@ -562,10 +564,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = "push-ui/Info.plist";
+                INFOPLIST_KEY_CFBundleIconFile = PUSH;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
 				INFOPLIST_KEY_LSUIElement = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -580,10 +584,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-                MARKETING_VERSION = 1.11.0;
-                CURRENT_PROJECT_VERSION = 1110;
+                MARKETING_VERSION = 1.16.7;
+                CURRENT_PROJECT_VERSION = 1167;
                 INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright (c) 2026 Sebastian Santos";
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+                INFOPLIST_FILE = "push-ui/Info.plist";
+                INFOPLIST_KEY_CFBundleIconFile = PUSH;
 				INFOPLIST_KEY_CFBundleDisplayName = PUSH;
 				INFOPLIST_KEY_LSUIElement = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;

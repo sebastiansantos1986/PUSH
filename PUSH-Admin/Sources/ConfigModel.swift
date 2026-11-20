@@ -47,7 +47,7 @@ let configGroups: [ConfigGroup] = [
         .init("apps.vscodeDeadline","VS Code deadline override · ISO 8601"),
         .init("apps.installomatorPath","Administrator-owned Installomator script",.text,"/usr/local/Installomator/Installomator.sh")]),
     .init(id:"identity", title:"Organization & appearance", subtitle:"Make messages recognizable to your users.", icon:"building.2", fields:[
-        .init("ui.menuBarEnabled","Show PUSH status in JamfCheckIn",.boolean,"true"),
+        .init("ui.menuBarEnabled","Show PUSH status in existing JamfCheckIn",.boolean,"true"),
         .init("ui.appName","Application title",.text,"PUSH — Software Update"), .init("ui.orgName","Organization"),
         .init("ui.itContactEmail","Support email"), .init("ui.itContactPhone","Support phone"), .init("ui.helpURL","Support website"),
         .init("ui.accentColorHex","Accent color",.text,"#0A84FF"), .init("ui.popupWidth","Popup width",.number(420...900),"540"),
@@ -56,7 +56,7 @@ let configGroups: [ConfigGroup] = [
         .init("ui.requireDeferralReason","Ask for a reason when choosing Later",.boolean,"false"),
         .init("ui.logoPath","Deployed logo path"), .init("ui.sfSymbolName","System symbol name"), .init("ui.hardBlockFullscreen","Cover all displays for hard blocks",.boolean,"false")]),
     .init(id:"updates", title:"Update policy", subtitle:"Choose the target explicitly, or let PUSH detect updates after deployment.", icon:"arrow.down.circle", fields:[
-        .init("update.targetVersion","Required macOS version",.text,"","Use a full version such as 27.0. Selecting a catalog release fills this field."),
+        .init("update.targetVersion","Required macOS version",.text,"","Use a full minimum version such as 27.0. Eligible native updates may meet it with a newer stable point release in the same generation. Selecting a catalog release fills this field."),
         .init("update.macOSName","macOS display name",.text,"macOS"), .init("update.releaseType","Update type",.choice(["minor","major"]),"minor"),
         .init("update.deadline","Deadline (ISO 8601)",.text,"","Overrides the automatic deadline, including for new targets. Clear it to use days from first detection. Example: 2026-12-01T18:00:00Z."),
         .init("update.deadlineRecoveryEnabled","Enable deadline failure recovery",.boolean,"true"),
@@ -66,6 +66,7 @@ let configGroups: [ConfigGroup] = [
         .init("update.allowUserUpdateRequests","Allow user update requests",.boolean,"true"),
         .init("update.maxDeferrals","Allowed deferrals",.number(0...100),"5"),
         .init("update.toastIntervalSeconds","Toast interval · seconds",.number(60...604800),"3600"),
+        .init("update.nudgeIntervalSeconds","Full reminder interval · seconds",.number(60...604800),"86400"),
         .init("update.autoInstallAfterDeadline","Install automatically after deadline",.boolean,"false"),
         .init("update.silentInstallAfterDeadline","Install silently after deadline",.boolean,"false"),
         .init("update.prepareAtDeadlineWhenLoggedOut","Download at deadline while logged out",.boolean,"true"),
@@ -76,6 +77,7 @@ let configGroups: [ConfigGroup] = [
         .init("auto.useMist","Also discover compatible full installers using mist-cli",.boolean,"true"),
         .init("auto.minorOnly","Limit detection to the current major release",.boolean,"true"),
         .init("auto.skipBetas","Exclude beta releases",.boolean,"true"),
+        .init("auto.maximumMajorVersion","Stay within major version · 0 has no limit",.number(0...100),"0"),
         .init("auto.enforceMinimumMajorVersion","Minimum major version · 0 disables",.number(0...100),"0"),
         .init("auto.minorDeadlineDays","Minor update deadline · days",.number(1...365),"7"),
         .init("auto.majorDeadlineDays","Major upgrade deadline · days",.number(1...365),"14"),
@@ -109,9 +111,15 @@ let configGroups: [ConfigGroup] = [
     .init(id:"messages", title:"User messages", subtitle:"Preview these messages in Popup Studio before exporting.", icon:"text.bubble", fields:[
         .init("ui.minorMessage","Minor update",.multiline,"A required macOS security update is available. Please save your work and install the update."),
         .init("ui.majorMessage","Major upgrade",.multiline,"A major macOS upgrade is available. Please save your work before continuing."),
+        .init("ui.forcedInstallMessage","Required installation notice",.multiline,""),
+        .init("ui.forcedInstallNotice","Required installation guidance",.multiline,""),
         .init("ui.deadlineMessage","Deadline reached",.multiline,"The update deadline has passed. Please save your work."),
         .init("ui.alreadyUpToDateMessage","Already compliant",.multiline,"Your Mac is running the required version of macOS. No action needed."),
-        .init("ui.installingMessage","Installation",.multiline,"Please keep your Mac powered on and connected to power."),
+        .init("ui.downloadHeader","Download window subtitle",.text,DownloadWording.header),
+        .init("ui.downloadTitle","Download heading · supports {macOS} and {version}",.text,DownloadWording.title),
+        .init("ui.downloadingMessage","Download message",.multiline,DownloadWording.message),
+        .init("ui.downloadFooter","Download footer guidance",.multiline,DownloadWording.footer),
+        .init("ui.installingMessage","Installation",.multiline,"macOS is preparing the update. Follow its progress below."),
         .init("ui.installMinorButtonLabel","Install button",.text,"Install Now"),
         .init("ui.installMajorButtonLabel","Upgrade button",.text,"Begin Upgrade"),
         .init("ui.deferButtonLabel","Defer button",.text,"Remind Me Later")]),
@@ -123,7 +131,8 @@ let configGroups: [ConfigGroup] = [
         .init("toast.showCloseButton","Show close button",.boolean,"true"), .init("toast.showDeferButton","Show Later button",.boolean,"true"),
         .init("toast.soundName","System sound · empty is silent",.text,""),
         .init("toast.installButtonLabel","Install button",.text,"Install Now"), .init("toast.deferButtonLabel","Defer button",.text,"Later")]),
-    .init(id:"management", title:"Management & authorization", subtitle:"Configure IT-managed authorization. End-user password prompts remain disabled.", icon:"key.horizontal", fields:[
+    .init(id:"management", title:"Management & authorization", subtitle:"Choose managed authorization or opt-in local user authorization at installation.", icon:"key.horizontal", fields:[
+        .init("auth.promptUserForInstall","Use saved user Keychain credentials; ask when needed",.boolean,"false"),
         .init("auth.localAccount","Managed local admin account"), .init("jamf.url","Jamf Pro URL"),
         .init("jamf.clientId","Jamf API client ID"), .init("jamf.reportEAAfterCheck","Report compliance to Jamf",.boolean,"false"),
         .init("jamf.eaName","Extension attribute",.text,"OS Update Compliance"),
@@ -141,6 +150,13 @@ struct ConfigDocument: Codable {
     var edits: [String:String] = [:]
     var sourceName = "New configuration"
     var majorOfferSettings:MajorOfferSettings?=nil
+    var selfServiceSettings:SelfServiceSettings?=nil
+    var jamfDeploymentID:UUID?=nil
+    var jamfObjectBindings:JamfObjectBindings?=nil
+    var jamfDeploymentSettings:JamfDeploymentSettings?=nil
+    var workflowRecipe:WorkflowRecipe?=nil
+    var workflowBaseline:WorkflowBaseline?=nil
+    var workflowDraftID:UUID?=UUID()
     var logoImageData: Data? = nil
     var wallpaperAssets: [String:WallpaperAssetReference]? = nil
     var logoImageName: String? = nil
@@ -184,7 +200,7 @@ struct ConfigDocument: Codable {
             if indent == 0, t.hasSuffix(":") {
                 if !seenSections.insert(t).inserted { document.formatIssues.append("Duplicate section \(t) must be merged before import.") }
             }
-            let raw = String(t[t.index(after:colon)...]).trimmingCharacters(in:.whitespaces)
+            let raw = DashboardConfig.yamlScalarText(String(t[t.index(after:colon)...]).trimmingCharacters(in:.whitespaces))
             if ["|","|-","|+",">",">-",">+"].contains(raw) { scalarBlock = indent }
             if raw.hasPrefix("&") || raw.hasPrefix("*") || raw.hasPrefix("!") { document.formatIssues.append("YAML anchors and tags are not supported by PUSH’s configuration parser.") }
         }
@@ -209,7 +225,7 @@ struct ConfigDocument: Codable {
             let indent = line.prefix { $0 == " " }.count
             if indent == 0, t.hasSuffix(":") { section = String(t.dropLast()); continue }
             guard indent == 2, section == pieces[0], let colon = t.firstIndex(of:":"), String(t[..<colon]) == pieces[1] else { continue }
-            let raw = String(t[t.index(after:colon)...]).trimmingCharacters(in:.whitespaces)
+            let raw = DashboardConfig.yamlScalarText(String(t[t.index(after:colon)...]).trimmingCharacters(in:.whitespaces))
             if ["|","|-","|+",">",">-",">+"].contains(raw) {
                 var body: [String] = []
                 for continuation in sourceLines.dropFirst(lineIndex+1) {
@@ -260,6 +276,7 @@ struct ConfigDocument: Codable {
     }
     var problems: [String] {
         var errors: [String] = formatIssues
+        if let maximum=Int(value("auto.maximumMajorVersion") ?? "0"),maximum>0,let minimum=Int(value("auto.enforceMinimumMajorVersion") ?? "0"),minimum>maximum {errors.append("The minimum macOS generation cannot be higher than the selected limit.")}
         for field in configGroups.flatMap(\.fields) {
             let v = value(field)
             if case .number(let range) = field.kind, Int(v).map({range.contains($0)}) != true { errors.append("\(field.title): enter a number in \(range.lowerBound)…\(range.upperBound).") }

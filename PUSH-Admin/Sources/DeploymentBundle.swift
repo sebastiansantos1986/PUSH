@@ -21,17 +21,16 @@ enum DeploymentProfiles {
     static func files(teamID:String,restartIdentity:RestartProfileIdentity?=nil)throws->[String:Data] {
         let team=teamID.trimmingCharacters(in:.whitespacesAndNewlines)
         guard team.isEmpty || (team.count==10 && team.utf8.allSatisfy{(48...57).contains($0)||(65...90).contains($0)}) else {throw DeploymentBundleError.invalid("Use a 10-character uppercase Apple Developer Team ID, or leave it blank for local testing.")}
-        let notifications=payload("com.apple.notificationsettings","notifications","JamfCheckIn Notifications",["NotificationSettings":[["BundleIdentifier":jamfID,"NotificationsEnabled":true,"AlertType":1,"BadgesEnabled":true,"SoundsEnabled":true,"ShowInNotificationCenter":true,"ShowInLockScreen":false]]])
         // Exact identities only: no broad team/prefix rule. Team constraints are
         // optional for local fixtures and must match production signing at deployment.
         var rules:[[String:Any]]=[]
-        for (type,value) in [("BundleIdentifier",jamfID),("Label",jamfID),("Label","com.push.autoupdate"),("Label","com.push.entra-registration")] {
-            var rule:[String:Any]=["RuleType":type,"RuleValue":value,"Comment":"PUSH / JamfCheckIn — Sebastian Santos"]
+        for (type,value) in [("Label","com.push.autoupdate"),("Label","com.push.entra-registration")] {
+            var rule:[String:Any]=["RuleType":type,"RuleValue":value,"Comment":"PUSH — Sebastian Santos"]
             if !team.isEmpty {rule["TeamIdentifier"]=team}
             rules.append(rule)
         }
-        let background=payload("com.apple.servicemanagement","background","PUSH and JamfCheckIn Background Items",["Rules":rules])
-        var files=["JamfCheckIn-Notifications.mobileconfig":try profile("notifications","JamfCheckIn Notifications",[notifications]),"PUSH-Background-Items.mobileconfig":try profile("background","PUSH Background Items",[background])]
+        let background=payload("com.apple.servicemanagement","background","PUSH Background Items",["Rules":rules])
+        var files=["PUSH-Background-Items.mobileconfig":try profile("background","PUSH Background Items",[background])]
         if let identity=restartIdentity {
             guard identity.valid(for:team) else {throw DeploymentBundleError.invalid("The restart approval must match the verified signing team. Select the production-signed executable again.")}
             let entry:[String:Any]=["Identifier":"/Library/Management/PUSH/push-cli","IdentifierType":"path","CodeRequirement":identity.requirement,"Allowed":true,"AEReceiverIdentifier":"com.apple.systemevents","AEReceiverIdentifierType":"bundleID","AEReceiverCodeRequirement":"identifier \"com.apple.systemevents\" and anchor apple"]
@@ -48,6 +47,9 @@ struct DeploymentBundleInput {
     var restartIdentity:RestartProfileIdentity?=nil
     var majorSettings:MajorOfferSettings?=nil
     var hardwareCatalog:AppleHardwareCatalog?=nil
+    var hardwareReporterPackage:Data?=nil
+    var hardwareInventoryScript:Data?=nil
+    var workflowChangeReport:String?=nil
 }
 enum DeploymentBundle {
     static func digest(_ data:Data)->String {SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()}
@@ -76,7 +78,7 @@ enum DeploymentBundle {
         func put(_ path:String,_ data:Data,_ mode:Int=0o600)throws {
             let url=stage.appendingPathComponent(path);try fm.createDirectory(at:url.deletingLastPathComponent(),withIntermediateDirectories:true,attributes:[.posixPermissions:0o700]);try data.write(to:url,options:.atomic);try fm.setAttributes([.posixPermissions:mode],ofItemAtPath:url.path)
         }
-        try fm.copyItem(at:client,to:stage.appendingPathComponent("PUSH-Client-1.11.0.pkg"))
+        try fm.copyItem(at:client,to:stage.appendingPathComponent("PUSH-Client-1.16.7.pkg"))
         try put("PolicyPayload/Library/Management/PUSH/config.yaml",Data(input.yaml.utf8))
         if let catalog=input.hardwareCatalog {try put("PolicyPayload/Library/Management/PUSH/assets/hardware/AppleHardwareCatalog.json",JSONEncoder().encode(catalog))}
         if let settings=input.majorSettings {try put("PolicyPayload/Library/Management/PUSH/major-offer.json",JSONEncoder().encode(settings))}
@@ -85,11 +87,16 @@ enum DeploymentBundle {
         try put("Build-Policy-Package.command",Data(buildPolicy.utf8),0o700)
         try put("Enable-Monitor.sh",Data(enableMonitor.utf8),0o700)
         try put("READ-ME-FIRST.txt",Data(readme(teamID:input.teamID).utf8))
+        if let package=input.hardwareReporterPackage,let script=input.hardwareInventoryScript {
+            try put("Inventory/PUSH-Tahoe-Readiness.pkg",package)
+            try put("Inventory/Jamf-EA-Tahoe-Readiness.sh",script)
+            try put("Inventory/READ-ME-FIRST.txt",Data(HardwareWorkflowExporter.guide.utf8))
+        }
         var entries:[[String:String]]=[]
         for case let file as URL in fm.enumerator(at:stage,includingPropertiesForKeys:[.isRegularFileKey])! {
             if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {entries.append(["path":try relativePath(file,to:stage),"sha256":digest(try Data(contentsOf:file))])}
         }
-        let manifest:[String:Any]=["formatVersion":1,"developer":"Sebastian Santos","engineVersion":"1.11.0","jamfCheckInVersion":"1.1.1","adminIncludedOnClients":false,"signingReadiness":input.teamID.isEmpty ? "Local testing only; no production Team ID supplied":"Verify Developer ID signatures and notarization before fleet rollout; Team ID is a profile constraint, not proof of signing","teamID":input.teamID,"restartProfileSourceSHA256":input.restartIdentity?.sha256 ?? "not included","files":entries.sorted{$0["path"]!<$1["path"]!}]
+        let manifest:[String:Any]=["formatVersion":1,"developer":"Sebastian Santos","engineVersion":"1.16.7","jamfCheckInIncluded":false,"adminIncludedOnClients":false,"signingReadiness":input.teamID.isEmpty ? "Local testing only; no production Team ID supplied":"Verify Developer ID signatures and notarization before fleet rollout; Team ID is a profile constraint, not proof of signing","teamID":input.teamID,"restartProfileSourceSHA256":input.restartIdentity?.sha256 ?? "not included","files":entries.sorted{$0["path"]!<$1["path"]!}]
         try put("manifest.json",JSONSerialization.data(withJSONObject:manifest,options:[.prettyPrinted,.sortedKeys]))
         try fm.moveItem(at:stage,to:destination)
     }
@@ -123,10 +130,10 @@ enum DeploymentBundle {
     """+"\n"
     static func readme(teamID:String)->String {"""
     PUSH Client Deployment — Sebastian Santos
-    Engine 1.11.0 / JamfCheckIn 1.1.1 / PUSH Admin 1.3.0
+    Engine 1.16.7 / PUSH Admin 1.16.10 (JamfCheckIn not included)
 
-    This bundle excludes PUSH Admin from client computers. The client installs PUSH
-    and JamfCheckIn, its only menu-bar app. The old standalone PUSH Status is retired.
+    This bundle excludes PUSH Admin from client computers. The client installs PUSH only. JamfCheckIn is not installed, replaced or launched.
+    Existing JamfCheckIn installations are left unchanged.
     Local builds are ad-hoc signed and installers unsigned. These profiles do not
     sign or notarize applications. Production signing/notarization and a managed pilot
     are required before fleet rollout. Team constraint: \(teamID.isEmpty ? "none (local testing)":teamID).
@@ -138,12 +145,9 @@ enum DeploymentBundle {
     2. Upload Profiles/*.mobileconfig as computer configuration profiles and scope to
        a pilot group first. Background Items requires MDM delivery; do not double-click
        it as a substitute for enrollment. Stable profile identifiers permit replacement.
-       If the old JamfCheckIn notifications profile is deployed, replace/unscope it to
-       avoid conflicting notification payloads. Team constraints must match all signed
-       executables for the matching service labels.
-    3. Deploy PUSH-Client-1.11.0.pkg. Previous PUSH/JamfCheckIn files are backed up.
-       PUSH monitors are paused. Nothing is launched by the installer. JamfCheckIn
-       starts on the next graphical login, or the user can open it manually.
+       Team constraints must match signed executables for the matching service labels.
+    3. Deploy PUSH-Client-1.16.7.pkg. Previous PUSH files are backed up.
+       PUSH monitors are paused. Nothing is launched by the installer.
     4. Run Build-Policy-Package.command on your IT Mac to create PUSH-Policy.pkg.
        Sign it for production, then deploy AFTER the client, while monitoring remains
        paused. It installs this draft's YAML/images and has no activation scripts.
@@ -159,9 +163,8 @@ enum DeploymentBundle {
     remove that app through your management tool on employee Macs after review.
 
     ACCESS
-    Notifications: JamfCheckIn native notifications only, banners enabled, lock-screen
-    display disabled. PUSH popup windows have their own delivery path. Notification
-    permission cannot guarantee that a user sees every alert in every Focus/session.
+    PUSH popup windows have their own delivery path; no JamfCheckIn notification
+    profile is generated.
     Background Items: exact app/launchd identities only; approval does not install or
     activate missing services. No broad identifier prefixes or team-wide rules.
     No Full Disk Access, Accessibility, Screen Recording or camera/microphone grants
@@ -171,12 +174,12 @@ enum DeploymentBundle {
     automation. This profile will NOT match the ad-hoc local client: deploy the exact
     production-signed release used to generate the requirement. Confirm TCC attribution
     on a managed pilot before enabling restart enforcement. Without restart enforcement,
-    ordinary update/status deployment uses only the two baseline profiles.
+    ordinary update/status deployment uses only the baseline background profile.
     Validate optional Jamf diagnostics on pilot Macs; ordinary root-owned log file
     permissions are not fixed by granting Full Disk Access. Ask only for demonstrated
     feature requirements. Permissions profiles cannot repair Keychain ACLs.
-    JamfCheckIn's pre-existing Jamf check-in/inventory administrator actions remain
-    separate; PUSH update requests use the guarded channel without a password prompt.
+    Self Service requests use the user login Keychain and an installation-only
+    password prompt when a valid saved password is not available.
 
     https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.servicemanagement.yaml
     https://github.com/apple/device-management/blob/release/mdm/profiles/com.apple.notificationsettings.yaml
