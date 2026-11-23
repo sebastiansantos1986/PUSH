@@ -86,7 +86,7 @@ extension AdminStore {
     }
     func buildConfiguredClient(teamID:String,restartIdentity:RestartProfileIdentity?,activation:ClientActivation,scope:ClientPackageScope = .full,clientOverride:URL? = nil) {
         guard !isBuildingDeployment else{return}
-        guard let client=clientOverride ?? Bundle.main.url(forResource:"PUSH-Client-1.16.7",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.16.10.";return}
+        guard let client=clientOverride ?? Bundle.main.url(forResource:"PUSH-Client-1.16.7",withExtension:"pkg") else {notice="The embedded client is missing. Reinstall PUSH Admin 1.16.11.";return}
         do {
             var input=try deploymentInput(teamID:teamID,restartIdentity:restartIdentity,scope:scope)
             let reviewed=ConfigDocument.load(input.yaml,name:"Package review")

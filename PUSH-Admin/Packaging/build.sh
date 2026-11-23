@@ -43,6 +43,6 @@ ditto "$output_dir/PUSH Admin.app" "$build_dir/payload/Applications/PUSH Admin.a
 pkgbuild --analyze --root "$build_dir/payload" "$build_dir/components.plist"
 plutil -replace 0.BundleIsRelocatable -bool NO "$build_dir/components.plist"
 pkgbuild --root "$build_dir/payload" --component-plist "$build_dir/components.plist" \
-    --ownership recommended --identifier com.push.admin.pkg --version 1.16.10 --install-location / \
-    "$output_dir/PUSH-Admin-1.16.10.pkg"
+    --ownership recommended --identifier com.push.admin.pkg --version 1.16.11 --install-location / \
+    "$output_dir/PUSH-Admin-1.16.11.pkg"
 echo 'Built the companion app and package. Neither was launched or installed.'

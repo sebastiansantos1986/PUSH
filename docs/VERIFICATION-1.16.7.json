@@ -1,14 +1,14 @@
 {
-  "date": "2026-11-20",
+  "date": "2026-11-22",
   "developer": "Sebastian Santos",
   "client": "1.16.7",
-  "admin": "1.16.10",
+  "admin": "1.16.11",
   "architectures": [
     "arm64",
     "x86_64"
   ],
   "client_safe_checks": 562,
-  "admin_export_checks": 700,
+  "admin_export_checks": 707,
   "attribution": {
     "swift_files": 161,
     "failures": 0
@@ -18,12 +18,13 @@
       "sha256": "11f2c4ce531fab2682869a3768f192ace8cf1cfb8814cffe0a794a53548d6443",
       "bytes": 14348254
     },
-    "PUSH-Admin-1.16.10.pkg": {
-      "sha256": "81a1b26cacc004cd75b3af7f6d1f21acb3fe0dac6c11595c8318e33dd0fb6766",
-      "bytes": 27131102
+    "PUSH-Admin-1.16.11.pkg": {
+      "sha256": "313f34484926a4b9dfdf08d2a6e4d9a69090e2de606148564b22f7f80503a933",
+      "bytes": 27131358
     }
   },
   "real_upgrade_with_nested_rule_fix": "pending pilot test",
   "agent_started_macos_download_install_or_restart": false,
-  "distribution": "pilot prerelease; ad-hoc code signatures and unsigned installer packages"
+  "distribution": "pilot prerelease; ad-hoc code signatures and unsigned installer packages",
+  "version_gate_regression": "1.16.6 requests repair; repair leaving 1.16.6 blocks the upgrade; 1.16.7 and newer healthy clients skip reinstallation"
 }

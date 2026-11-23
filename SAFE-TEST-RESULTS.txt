@@ -1,8 +1,8 @@
-PUSH 1.16.7 / Admin 1.16.10 — November 20, 2026
+PUSH 1.16.7 / Admin 1.16.11 — November 22, 2026
 Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
 
 PASS: 562 client safe regression checks.
-PASS: 700 Admin/export checks using the matching built client package.
+PASS: 707 Admin/export checks using the matching built client package.
 PASS: attribution verified across 161 Swift source files.
 PASS: arm64/x86_64 Release client/UI and Admin builds.
 PASS: code-signature verification and embedded client byte identity.
@@ -13,3 +13,5 @@ No real macOS download, installer execution or restart was run by the agent.
 The final nested-resource handling still needs a real pilot upgrade/restart test.
 Local packages are ad-hoc signed code in unsigned installer packages.
 See docs/VERIFICATION-1.16.7.md and JSON for scope and checksums.
+
+Version gate correction: tests execute old-patch repair and no-op repair failures without real Jamf/installer commands. Existing live Jamf scripts require updating separately.

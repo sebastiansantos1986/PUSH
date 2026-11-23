@@ -16,6 +16,7 @@ struct SelfServiceSettings:Codable {
     }
 }
 enum SelfServiceKit {
+    static let requiredClientVersion="1.16.7"
     static let logoPath="/Library/Management/PUSH/self-service/assets/popup-logo.png"
     static let states=["downloading","installing","preflightDisk","preflightPower","rebooting"]
     static func profile(_ document:ConfigDocument,major:Int)throws->ConfigDocument {
@@ -57,6 +58,7 @@ enum SelfServiceKit {
         jamf=/usr/local/jamf/bin/jamf
         mist=/usr/local/bin/mist
         mist_alt=/opt/homebrew/bin/mist
+        required_client_version="\(requiredClientVersion)"
         current_os="$(/usr/bin/sw_vers -productVersion)"
         current_major="${current_os%%.*}"
         [[ "$current_major" =~ ^[0-9]+$ ]] || { echo 'Unable to determine the running macOS generation.' >&2; exit 1; }
@@ -76,13 +78,14 @@ enum SelfServiceKit {
         }
         client_version_ok() {
             trusted_executable "$cli" || return 1
-            local version major minor patch
+            local version major minor patch required_major required_minor required_patch
             version="$("$cli" --version)" || return 1
             version="${version##*v}"
             [[ "$version" =~ ^([0-9]+)\\.([0-9]+)\\.([0-9]+)$ ]] || return 1
             major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
-            if (( 10#$major > 1 || (10#$major == 1 && (10#$minor > 16 || (10#$minor == 16 && 10#$patch >= 3))) )); then return 0; fi
-            echo "Installed PUSH client is $version; this offer requires 1.16.7 or newer." >&2
+            IFS=. read -r required_major required_minor required_patch <<< "$required_client_version"
+            if (( 10#$major > 10#$required_major || (10#$major == 10#$required_major && (10#$minor > 10#$required_minor || (10#$minor == 10#$required_minor && 10#$patch >= 10#$required_patch))) )); then return 0; fi
+            echo "Installed PUSH client is $version; this offer requires $required_client_version or newer." >&2
             return 1
         }
         client_ready() { client_version_ok && trusted_executable "$ui"; }
@@ -104,11 +107,11 @@ enum SelfServiceKit {
         }
         prerequisites_ready() { client_ready && mist_ready; }
         if ! prerequisites_ready; then
-            if client_version_ok && [[ "$("$cli" --version)" != 'push-cli v1.16.7' ]]; then
+            if client_version_ok && [[ "$("$cli" --version)" != "push-cli v$required_client_version" ]]; then
                 echo 'A newer PUSH client has a missing/untrusted prerequisite. IT must repair its matching prerequisite package; this offer will not downgrade it.' >&2; exit 1
             fi
             if [[ -z "$client_event" ]]; then
-                echo 'PUSH client or popup UI is missing/outdated. Deploy the matching PUSH Client 1.16.7 prerequisite before this manually exported offer.' >&2; exit 1
+                echo "PUSH client or popup UI is missing/outdated. Deploy the matching PUSH Client $required_client_version prerequisite before this manually exported offer." >&2; exit 1
             fi
             trusted_executable "$jamf" || { echo 'The protected Jamf agent is missing. IT must repair enrollment/client deployment.' >&2; exit 1; }
             echo 'Preparing PUSH and required Mist prerequisites before the selected macOS offer...'

@@ -1,4 +1,4 @@
-# PUSH Admin 1.16.10
+# PUSH Admin 1.16.11
 
 Developer: Sebastian Santos · Attribution ID: PUSH-DEV-SEBASTIAN-SANTOS
 
@@ -22,4 +22,4 @@ and popup previews remain isolated simulations. Real upgrade/restart validation
 of the latest installer-resource fix is still pending on the pilot Mac.
 
 See [Self Service guide](../docs/SELF-SERVICE.md), [build instructions](../docs/BUILDING.md)
-and [release notes](../docs/RELEASE-NOTES-1.16.7-ADMIN-1.16.10.md).
+and [release notes](../docs/RELEASE-NOTES-1.16.7-ADMIN-1.16.11.md).

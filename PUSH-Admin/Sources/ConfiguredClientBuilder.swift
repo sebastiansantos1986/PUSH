@@ -151,7 +151,7 @@ enum ConfiguredClientBuilder {
             guard let reviewed=input.restartIdentity,identity.teamID==reviewed.teamID,identity.requirement==reviewed.requirement,identity.sha256==reviewed.sha256 else {throw DeploymentBundleError.invalid("The client's signed executable does not match the selected restart approval. Use the matching signed production client, or disable uptime enforcement for local testing.")}
         }
         let readme="""
-        PUSH Configured Client — built with PUSH Admin 1.16.10
+        PUSH Configured Client — built with PUSH Admin 1.16.11
         Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
 
         Package contents: \(scope.title)
@@ -241,7 +241,7 @@ enum ConfiguredClientBuilder {
         try fm.removeItem(at:bundle.appendingPathComponent("manifest.json"))
         var files:[[String:String]]=[]
         for case let file as URL in fm.enumerator(at:bundle,includingPropertiesForKeys:[.isRegularFileKey])! {if (try file.resourceValues(forKeys:[.isRegularFileKey])).isRegularFile==true {files.append(["path":try DeploymentBundle.relativePath(file,to:bundle),"sha256":DeploymentBundle.digest(try Data(contentsOf:file))])}}
-        let manifest:[String:Any]=["formatVersion":2,"developer":"Sebastian Santos","adminVersion":"1.16.10","clientVersion":"1.16.7","scope":scope.rawValue,"majorOfferIsSimulationOnly":true,"activation":activation.rawValue,"yamlSHA256":yamlHash,"sourceClientSHA256":DeploymentBundle.digest(try Data(contentsOf:client)),"adminIncludedOnClients":false,"signing":"Unsigned generated installer; verify production signing/notarization separately","files":files.sorted{$0["path"]!<$1["path"]!}]
+        let manifest:[String:Any]=["formatVersion":2,"developer":"Sebastian Santos","adminVersion":"1.16.11","clientVersion":"1.16.7","scope":scope.rawValue,"majorOfferIsSimulationOnly":true,"activation":activation.rawValue,"yamlSHA256":yamlHash,"sourceClientSHA256":DeploymentBundle.digest(try Data(contentsOf:client)),"adminIncludedOnClients":false,"signing":"Unsigned generated installer; verify production signing/notarization separately","files":files.sorted{$0["path"]!<$1["path"]!}]
         try JSONSerialization.data(withJSONObject:manifest,options:[.prettyPrinted,.sortedKeys]).write(to:bundle.appendingPathComponent("manifest.json"))
         try fm.moveItem(at:bundle,to:destination)
     }

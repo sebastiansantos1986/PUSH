@@ -1,6 +1,6 @@
 # Jamf Self Service workflows
 
-Developer: Sebastian Santos · PUSH Client 1.16.7 / Admin 1.16.10
+Developer: Sebastian Santos · PUSH Client 1.16.7 / Admin 1.16.11
 
 ## User experience
 
@@ -57,3 +57,7 @@ A partial publish retains a receipt and leaves affected policies requested disab
 If prerequisite verification fails, inspect the installed CLI version, UI identity, Mist version, root-protected paths and installer receipt. A success message for a package install does not prove its payload is the required version. Remove obsolete downgrade policies from the pilot’s deployment plan; do not delete unrelated policies or reset history indiscriminately.
 
 The 1.16.7 nested-resource change is automated-test verified. Its complete download/preparation/restart journey still needs a real pilot test. See [verification](VERIFICATION-1.16.7.md).
+
+## Updating an older exported version gate
+
+Admin 1.16.11 corrects an earlier script bug that accepted Client 1.16.3 while displaying a 1.16.7 requirement. Update the existing Jamf script by rebuilding/reviewing/publishing its workflow. A package upload alone does not update the script, and installing Admin does not change Jamf automatically. The corrected script requests repair for Client 1.16.6 and refuses to continue if the prerequisite leaves it installed.

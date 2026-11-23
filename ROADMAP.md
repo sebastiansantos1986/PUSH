@@ -1,6 +1,6 @@
 # PUSH roadmap
 
-Developer: Sebastian Santos · PUSH Client 1.16.7 / Admin 1.16.10
+Developer: Sebastian Santos · PUSH Client 1.16.7 / Admin 1.16.11
 
 ## Implemented in the pilot source
 

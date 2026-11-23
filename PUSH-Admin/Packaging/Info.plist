@@ -7,8 +7,8 @@
 <key>CFBundleDisplayName</key><string>PUSH Admin</string>
 <key>CFBundleIconFile</key><string>PUSHAdmin.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.16.10</string>
-<key>CFBundleVersion</key><string>54</string>
+<key>CFBundleShortVersionString</key><string>1.16.11</string>
+<key>CFBundleVersion</key><string>55</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Sebastian Santos. All rights reserved.</string>

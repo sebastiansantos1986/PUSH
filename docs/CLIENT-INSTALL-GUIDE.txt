@@ -1,7 +1,7 @@
-PUSH Client 1.16.7 / PUSH Admin 1.16.10
+PUSH Client 1.16.7 / PUSH Admin 1.16.11
 Developer: Sebastian Santos — PUSH-DEV-SEBASTIAN-SANTOS
 
-IT MAC: install PUSH-Admin-1.16.10.pkg. The Admin app includes the matching
+IT MAC: install PUSH-Admin-1.16.11.pkg. The Admin app includes the matching
 client and verified Mist package for workflow export/publishing.
 
 EMPLOYEE MAC: deploy the reviewed configured client or optional Self Service

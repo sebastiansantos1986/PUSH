@@ -474,12 +474,18 @@ func runSelfServiceBootstrapChecks(root:URL)throws {
     }
     let missing=try run(version:nil,hasUI:false,behavior:"install")
     check(missing.0==0 && missing.1=="policy -event "+event+"\n" && missing.2.contains("self-service-upgrade --major 26 --config /Library/Management/PUSH/self-service/macOS-26.yaml"),"missing client requests prerequisite then continues only after client/UI verification")
-    for version in ["1.16.7","1.17.0","2.0.0"] {
+    for version in ["1.16.7","1.16.8","1.17.0","2.0.0"] {
         let ready=try run(version:version,hasUI:true,behavior:"fail")
         check(ready.0==0 && ready.1.isEmpty && !ready.2.isEmpty,"current/newer client skips reinstallation "+version)
     }
     let old=try run(version:"1.14.0",hasUI:true,behavior:"install")
     check(old.0==0 && !old.1.isEmpty && !old.2.isEmpty,"outdated client requests prerequisite and rechecks before upgrade")
+    for version in ["1.16.3","1.16.5","1.16.6"] {
+        let repaired=try run(version:version,hasUI:true,behavior:"install")
+        check(repaired.0==0 && repaired.1=="policy -event "+event+"\n" && !repaired.2.isEmpty,"older patch release requests client repair before upgrade: "+version)
+        let retained=try run(version:version,hasUI:true,behavior:"noop")
+        check(retained.0 != 0 && !retained.1.isEmpty && retained.2.isEmpty && retained.3.contains("Installed PUSH client is "+version),"successful prerequisite exit cannot continue with older patch release: "+version)
+    }
     let uiMissing=try run(version:"1.16.7",hasUI:false,behavior:"install")
     check(uiMissing.0==0 && !uiMissing.1.isEmpty,"missing matching popup UI requests client repair before upgrade")
     let future=try run(version:"1.17.0",hasUI:false,behavior:"install")

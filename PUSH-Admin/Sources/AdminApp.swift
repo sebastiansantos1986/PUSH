@@ -25,7 +25,7 @@ struct PUSHAdminApp: App {
         WindowGroup("PUSH Admin") { AdminRoot().environmentObject(store).frame(minWidth:1100,minHeight:780) }
             .defaultSize(width:1250,height:900)
         Settings { VStack(alignment:.leading,spacing:12) {
-            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.16.10 · Developer: Sebastian Santos")
+            Text("PUSH Admin").font(.title2.bold()); Text("Version 1.16.11 · Developer: Sebastian Santos")
             Text("Mist checks run at launch and when you refresh. They list stable installers compatible with this Mac; they never download an installer.")
             Link("mist-cli project",destination:URL(string:"https://github.com/ninxsoft/mist-cli")!)
         }.padding(28).frame(width:500) }
@@ -72,7 +72,7 @@ struct AdminRoot: View {
             Divider()
             VStack(alignment: .leading, spacing: 5) {
                 Label("Credentials stay in Keychain", systemImage: "lock.shield").font(.caption).foregroundStyle(.secondary)
-                Text("Sebastian Santos · v1.16.10").font(.caption2).foregroundStyle(.tertiary)
+                Text("Sebastian Santos · v1.16.11").font(.caption2).foregroundStyle(.tertiary)
             }.padding(18)
         }.background(Color(NSColor.controlBackgroundColor))
     }

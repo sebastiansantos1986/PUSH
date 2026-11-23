@@ -130,7 +130,7 @@ enum DeploymentBundle {
     """+"\n"
     static func readme(teamID:String)->String {"""
     PUSH Client Deployment — Sebastian Santos
-    Engine 1.16.7 / PUSH Admin 1.16.10 (JamfCheckIn not included)
+    Engine 1.16.7 / PUSH Admin 1.16.11 (JamfCheckIn not included)
 
     This bundle excludes PUSH Admin from client computers. The client installs PUSH only. JamfCheckIn is not installed, replaced or launched.
     Existing JamfCheckIn installations are left unchanged.
